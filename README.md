@@ -1,4 +1,4 @@
-# GWAS - File - Filter (lied\_egypt\_genome)
+# Analyzing a genome assembly of an egyptian (lied\_egypt\_genome)
 
 **Author:** Inken Wohlers
 
