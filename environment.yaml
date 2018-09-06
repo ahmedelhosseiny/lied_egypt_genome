@@ -1,0 +1,6 @@
+channels:
+  - r
+  - bioconda
+dependencies:
+  - snakemake == 5.2.2
+ 
