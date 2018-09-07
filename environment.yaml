@@ -3,4 +3,6 @@ channels:
   - bioconda
 dependencies:
   - snakemake == 5.2.2
+  - biopython == 1.70
+  - busco == 3.0.2
  
