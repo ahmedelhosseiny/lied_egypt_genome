@@ -102,10 +102,117 @@ rule compute_assembly_stats:
                     else:
                         break
                 f_out.write("N"+str(stat)+": "+str(scaffold_len)+"\n")
+                
+# Downloading the Busco lineage information
+rule download_linage:
+    output: temp("busco_lineage/mammalia_odb9.tar.gz")
+    shell: "wget -P busco_lineage https://busco.ezlab.org/datasets/mammalia_odb9.tar.gz"
+    
+# ... and extracting it; the output files are just two of the many files in this
+# archive
+rule extract_lineage:
+    input: "busco_lineage/mammalia_odb9.tar.gz"
+    output: "busco_lineage/mammalia_odb9/lengths_cutoff",
+            "busco_lineage/mammalia_odb9/scores_cutoff"
+    shell: "tar --directory busco_lineage -xvzf {input}"
                     
-                
+# Running Busco on a genome file
+# --force: Deleting results folder; start new run
+# --tmp: Likely /tmp is too small, so make a new tmp folder on scratch (also 
+#  this can be accessed much quicker)
+# --blast_single_core: There is a (known!) bug, that blast sometimes fails in
+# multi-cpu mode. I also observe this for GRCh38, with exactly the corresponding
+# error message; therefore, this is run with a single core.
+# Note: According to Busco documentation, 3.1Gbp genome assessment with 12 CPUs 
+# takes 6 days and 15 hours
+# I use a separate environment for busco, because, as of now, its newest version
+# cannot be used together with the repeatmasker and installing it together 
+# would result in downgrading of augustus, blast, boost and busco to older 
+# versions.
+rule run_busco:
+    input: "busco_lineage/mammalia_odb9/lengths_cutoff",
+           "data/pilon_test.fasta"
+    output: "run_busco_EGYPTREF/short_summary_busco_EGYPTREF.txt"
+    threads: 24
+    conda: "envs/busco.yaml"
+    shell: "rm -rf /scratch/tmp_busco_1; " + \
+           "mkdir /scratch/tmp_busco_1; " + \
+           "run_busco --in {input[1]} " + \
+                     "--out busco_EGYPTREF " + \
+                     "--lineage_path busco_lineage/mammalia_odb9 " + \
+                     "--mode genome " + \
+                     "--force " + \
+                     "--cpu 24 " + \
+                     "--blast_single_core " + \
+                     "--tmp /scratch/tmp_busco_1; " + \
+                     "rm -rf /scratch/tmp_busco_1; "
 
-                
+# Running Busco on a genome file
+rule run_busco_grch38:
+    input: "busco_lineage/mammalia_odb9/lengths_cutoff",
+           "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly_test.fa"
+    output: "run_busco_GRCh38/short_summary_busco_GRCh38.txt"
+    threads: 24
+    conda: "envs/busco.yaml"
+    shell: "rm -rf /scratch/tmp_busco_2; " + \
+           "mkdir /scratch/tmp_busco_2; " + \
+           "run_busco --in {input[1]} " + \
+                     "--out busco_GRCh38 " + \
+                     "--lineage_path busco_lineage/mammalia_odb9 " + \
+                     "--mode genome " + \
+                     "--force " + \
+                     "--cpu 24 " + \
+                     "--blast_single_core " + \
+                     "--tmp /scratch/tmp_busco_2; " + \
+                     "rm -rf /scratch/tmp_busco_2; "
 
+# Downloading all GRCh38 sequence data available from Ensembl (release 93,
+# but note, that on sequence level, the release shouldn't make a difference)
+rule download_GRCh38:
+    output: "seq_GRCh38/Homo_sapiens.GRCh38.{dna_type}.{chr_or_type}.fa.gz"
+    run: 
+        # Remove target dir to obtain file name for download
+        base = output[0].split("/")[1]
+        shell("wget -P seq_GRCh38 " + \
+        "ftp://ftp.ensembl.org/pub/release-93/fasta/homo_sapiens/dna/{base}")
+              
+# Download README
+rule download_GRCh38_readme:
+    output: "seq_GRCh38/README"
+    shell: "wget -P seq_GRCh38 " + \
+           "ftp://ftp.ensembl.org/pub/release-93/fasta/homo_sapiens/dna/README"
 
+# Downloading all GRCh38 sequence files available under the ENSEMBLE release 93
+# FTP address 
+CHR_OR_TYPE = ["chromosome."+str(x) for x in range(1,23)] \
+       + ["chromosome."+str(x) for x in ["MT","X","Y"]] \
+       + ["nonchromosomal","primary_assembly","toplevel","alt"]
+rule download_GRCh38_all:
+    input: expand("seq_GRCh38/"+ \
+                  "Homo_sapiens.GRCh38.{dna_type}.{chr_or_type}.fa.gz", \
+            dna_type=["dna","dna_rm","dna_sm"],chr_or_type=CHR_OR_TYPE),
+           "seq_GRCh38/README"
+
+# Uncompressing fasta files, needed e.g. for Busco analysis
+rule uncompress_fasta:
+    input: "{path_and_fname}.fa.gz"
+    output: "{path_and_fname}.fa"
+    shell: "gzip -cdk {input} > {output}"
+
+# Copy the assembled sequence
+rule cp_and_rename_assembly:
+    input: "data/pilon.fasta"
+    output: "seq_EGYPTREF/Homo_sapiens.EGYPTREF.dna.toplevel.fa"
+    shell: "cp {input} {output}"
+
+# Running repeatmasker on the Egyptian genome assembly
+# I use a separate environment for repeatmasker, because, as of now, it cannot 
+# be used together with the newest busco version and installing it together 
+# would result in downgrading of augustus, blast, boost and busco to older 
+# versions.
+rule run_repeatmasker:
+    input: "seq_{assembly}/Homo_sapiens.{assembly}.dna.toplevel.fa"
+    output: "seq_{assembly}/Homo_sapiens.{assembly}.dna.toplevel.fa"
+    conda: "envs/repeatmasker.yaml"
+    shell: "RepeatMasker --version"
 
