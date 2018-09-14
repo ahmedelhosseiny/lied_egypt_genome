@@ -131,7 +131,7 @@ rule extract_lineage:
 # versions.
 rule run_busco:
     input: "busco_lineage/mammalia_odb9/lengths_cutoff",
-           "data/pilon_test.fasta"
+           "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa"
     output: "run_busco_EGYPTREF/short_summary_busco_EGYPTREF.txt"
     threads: 24
     conda: "envs/busco.yaml"
@@ -150,7 +150,7 @@ rule run_busco:
 # Running Busco on a genome file
 rule run_busco_grch38:
     input: "busco_lineage/mammalia_odb9/lengths_cutoff",
-           "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly_test.fa"
+           "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa"
     output: "run_busco_GRCh38/short_summary_busco_GRCh38.txt"
     threads: 24
     conda: "envs/busco.yaml"
@@ -194,9 +194,10 @@ rule download_GRCh38_all:
            "seq_GRCh38/README"
 
 # Uncompressing fasta files, needed e.g. for Busco analysis
+# -d decompress; -k keep archive; -c to stdout
 rule uncompress_fasta:
-    input: "{path_and_fname}.fa.gz"
-    output: "{path_and_fname}.fa"
+    input: "seq_GRCh38/{fname}.fa.gz"
+    output: "seq_GRCh38/{fname}.fa"
     shell: "gzip -cdk {input} > {output}"
 
 # Copy the assembled sequence
@@ -210,9 +211,37 @@ rule cp_and_rename_assembly:
 # be used together with the newest busco version and installing it together 
 # would result in downgrading of augustus, blast, boost and busco to older 
 # versions.
+# -s  Slow search; 0-5% more sensitive, 2-3 times slower than default
+# -q  Quick search; 5-10% less sensitive, 2-5 times faster than default
+# -qq Rush job; about 10% less sensitive, 4->10 times faster than default
+# -html Creates an additional output file in xhtml format
+# -gff Creates an additional Gene Feature Finding format output
 rule run_repeatmasker:
     input: "seq_{assembly}/Homo_sapiens.{assembly}.dna.toplevel.fa"
-    output: "seq_{assembly}/Homo_sapiens.{assembly}.dna.toplevel.fa"
+    output: "repeatmasked_{assembly}/Homo_sapiens.{assembly}.dna.toplevel.fa.cat",
+            "repeatmasked_{assembly}/Homo_sapiens.{assembly}.dna.toplevel.fa.masked",
+            "repeatmasked_{assembly}/Homo_sapiens.{assembly}.dna.toplevel.fa.out",
+            "repeatmasked_{assembly}/Homo_sapiens.{assembly}.dna.toplevel.fa.out.gff",
+            "repeatmasked_{assembly}/Homo_sapiens.{assembly}.dna.toplevel.fa.out.html",
+            "repeatmasked_{assembly}/Homo_sapiens.{assembly}.dna.toplevel.fa.tbl"
+    threads: 24
     conda: "envs/repeatmasker.yaml"
-    shell: "RepeatMasker --version"
+    shell: "workdir=$PWD; cd /scratch; " + \
+           "rm -rf /scratch/repeatmasked_{wildcards.assembly}; " + \
+           "mkdir /scratch/repeatmasked_{wildcards.assembly}; " + \
+           "RepeatMasker -species mammalia " + \
+           "             -dir /scratch/repeatmasked_{wildcards.assembly} " + \
+           "             -pa 24 " + \
+           "             -xsmall " + \
+           "             -q " + \
+           "             -html " + \
+           "             -gff $workdir/{input}; " + \
+           "cd $workdir; "
+           "rsync -avz /scratch/repeatmasked_{wildcards.assembly} .; " + \
+           "rm -rf /scratch/repeatmasked_{wildcards.assembly}; "
+
+rule run_repeatmasker_all:
+    input: "repeatmasked_GRCh38/Homo_sapiens.GRCh38.dna.toplevel.fa.tbl",
+           "repeatmasked_EGYPTREF/Homo_sapiens.EGYPTREF.dna.toplevel.fa.tbl"
+            
 

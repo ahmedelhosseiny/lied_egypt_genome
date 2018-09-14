@@ -2,7 +2,7 @@
 
 ## If environment.yaml has been changed, the existing environment needs to be removed
 ## in order to re-generate the environment using:
-source ~/.bashrc; conda env remove -n workflow_lied_egypt_genome
+#source ~/.bashrc; conda env remove -n workflow_lied_egypt_genome
 
 mkdir -p log
 
@@ -14,7 +14,7 @@ fi
 source activate workflow_lied_egypt_genome
 
 echo "RUNNING SNAKEMAKE WORKFLOW..."
-snakemake -k -j 50 --use-conda --jobname "{jobid}.{rulename}.sh" --cluster "sbatch --mem-per-cpu 4G -c 25 -o log/%j.{rule}.log" --printshellcmds run_busco run_busco_grch38
+snakemake -k -j 100 --use-conda --jobname "{jobid}.{rulename}.sh" --cluster "sbatch --mem-per-cpu 4G -c 25 -o log/%j.{rule}.log" --printshellcmds run_busco run_busco_grch38 run_repeatmasker_all
 
 source deactivate
 conda list -n workflow_lied_egypt_genome --export > environment_versions.yaml
