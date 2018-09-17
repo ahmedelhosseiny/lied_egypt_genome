@@ -6,6 +6,13 @@
 
 from Bio import SeqIO
 
+
+# Chromosome and scaffold names for later use
+CHR_GRCh38 = ["chromosome."+str(x) for x in range(1,23)] \
+           + ["chromosome."+str(x) for x in ["MT","X","Y"]]
+EGYPT_SCAFFOLDS = ["fragScaff_scaffold_"+str(x)+"_pilon" for x in range(0,41)] \
+                + ["original_scaffold_"+str(x)+"_pilon" for x in range(41,145)]
+
 rule scaffold_names:
     input: "data/pilon.fasta"
     output: "results/scaffold_names.txt"
@@ -131,40 +138,41 @@ rule extract_lineage:
 # versions.
 rule run_busco:
     input: "busco_lineage/mammalia_odb9/lengths_cutoff",
-           "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa"
-    output: "run_busco_EGYPTREF/short_summary_busco_EGYPTREF.txt"
-    threads: 24
+           "seq_{assembly}/Homo_sapiens.{assembly}.dna.{chr_or_type}.fa"
+    output: "busco_{assembly}/run_busco_{assembly}_{chr_or_type}/short_summary_busco_{assembly}_{chr_or_type}.txt"
+    threads: 12
     conda: "envs/busco.yaml"
-    shell: "rm -rf /scratch/tmp_busco_1; " + \
-           "mkdir /scratch/tmp_busco_1; " + \
-           "run_busco --in {input[1]} " + \
-                     "--out busco_EGYPTREF " + \
-                     "--lineage_path busco_lineage/mammalia_odb9 " + \
-                     "--mode genome " + \
-                     "--force " + \
-                     "--cpu 24 " + \
-                     "--blast_single_core " + \
-                     "--tmp /scratch/tmp_busco_1; " + \
-                     "rm -rf /scratch/tmp_busco_1; "
+    shell:  "workdir=$PWD; cd /scratch; " + \
+            "rm -rf /scratch/run_busco_{wildcards.assembly}_{wildcards.chr_or_type}; " + \
+            "rm -rf /scratch/tmp_busco_{wildcards.assembly}_{wildcards.chr_or_type}; " + \
+            "mkdir /scratch/tmp_busco_{wildcards.assembly}_{wildcards.chr_or_type}; " + \
+            "cd /scratch; " + \
+            "run_busco --in $workdir/{input[1]} " + \
+            "--out busco_{wildcards.assembly}_{wildcards.chr_or_type} " + \
+            "--lineage_path $workdir/busco_lineage/mammalia_odb9 " + \
+            "--mode genome " + \
+            "--force " + \
+            "--cpu 12 " + \
+#           "--blast_single_core " + \
+            "--tmp /scratch/tmp_busco_{wildcards.assembly}_{wildcards.chr_or_type}; " + \
+            "rm -rf /scratch/tmp_busco_{wildcards.assembly}_{wildcards.chr_or_type}; " + \
+            "mkdir -p busco_{wildcards.assembly}; " + \
+            "cd $workdir; "
+            "rm -rf busco_{wildcards.assembly}/run_busco_{wildcards.assembly}_{wildcards.chr_or_type}; " + \
+            "rsync -avz /scratch/run_busco_{wildcards.assembly}_{wildcards.chr_or_type} busco_{wildcards.assembly}/; " + \
+            "rm -rf /scratch/run_busco_{wildcards.assembly}_{wildcards.chr_or_type}; "
 
-# Running Busco on a genome file
-rule run_busco_grch38:
-    input: "busco_lineage/mammalia_odb9/lengths_cutoff",
-           "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa"
-    output: "run_busco_GRCh38/short_summary_busco_GRCh38.txt"
-    threads: 24
-    conda: "envs/busco.yaml"
-    shell: "rm -rf /scratch/tmp_busco_2; " + \
-           "mkdir /scratch/tmp_busco_2; " + \
-           "run_busco --in {input[1]} " + \
-                     "--out busco_GRCh38 " + \
-                     "--lineage_path busco_lineage/mammalia_odb9 " + \
-                     "--mode genome " + \
-                     "--force " + \
-                     "--cpu 24 " + \
-                     "--blast_single_core " + \
-                     "--tmp /scratch/tmp_busco_2; " + \
-                     "rm -rf /scratch/tmp_busco_2; "
+# Running busco on the entire primary assembly...
+rule run_busco_primary_assembly:
+    input: "busco_EGYPTREF/run_busco_EGYPTREF_primary_assembly/short_summary_busco_EGYPTREF_primary_assembly.txt",
+           "busco_GRCh38/run_busco_GRCh38_primary_assembly/short_summary_busco_GRCh38_primary_assembly.txt"
+
+# ... and running busco chromosome or scaffold-wise
+rule run_busco_chromosomewise:
+    input: expand("busco_EGYPTREF/run_busco_EGYPTREF_{scaffolds}/short_summary_busco_EGYPTREF_{scaffolds}.txt", \
+                  scaffolds=EGYPT_SCAFFOLDS),
+           expand("busco_GRCh38/run_busco_GRCh38_{chrom}/short_summary_busco_GRCh38_{chrom}.txt", \
+                  chrom=CHR_GRCh38)
 
 # Downloading all GRCh38 sequence data available from Ensembl (release 93,
 # but note, that on sequence level, the release shouldn't make a difference)
@@ -198,12 +206,13 @@ rule download_GRCh38_all:
 rule uncompress_fasta:
     input: "seq_GRCh38/{fname}.fa.gz"
     output: "seq_GRCh38/{fname}.fa"
+    resources: io=1
     shell: "gzip -cdk {input} > {output}"
 
 # Copy the assembled sequence
 rule cp_and_rename_assembly:
     input: "data/pilon.fasta"
-    output: "seq_EGYPTREF/Homo_sapiens.EGYPTREF.dna.toplevel.fa"
+    output: "seq_EGYPTREF/Homo_sapiens.EGYPTREF.dna.primary_assembly.fa"
     shell: "cp {input} {output}"
 
 # Running repeatmasker on the Egyptian genome assembly
@@ -216,22 +225,28 @@ rule cp_and_rename_assembly:
 # -qq Rush job; about 10% less sensitive, 4->10 times faster than default
 # -html Creates an additional output file in xhtml format
 # -gff Creates an additional Gene Feature Finding format output
+# Note: Result file 
+# "repeatmasked_{assembly}/Homo_sapiens.{assembly}.dna.{chr_or_type}.fa.cat.gz"
+# is not in the output file list, because depending on the size, either this
+# file or the uncompressed file
+# "repeatmasked_{assembly}/Homo_sapiens.{assembly}.dna.{chr_or_type}.fa.cat"
+# will be generated.
+# Temporarily outcommented output files (in case they will also be zipped):
+# "repeatmasked_{assembly}/Homo_sapiens.{assembly}.dna.{chr_or_type}.fa.out",
+# "repeatmasked_{assembly}/Homo_sapiens.{assembly}.dna.{chr_or_type}.fa.out.gff",
+# "repeatmasked_{assembly}/Homo_sapiens.{assembly}.dna.{chr_or_type}.fa.out.html",
 rule run_repeatmasker:
-    input: "seq_{assembly}/Homo_sapiens.{assembly}.dna.toplevel.fa"
-    output: "repeatmasked_{assembly}/Homo_sapiens.{assembly}.dna.toplevel.fa.cat",
-            "repeatmasked_{assembly}/Homo_sapiens.{assembly}.dna.toplevel.fa.masked",
-            "repeatmasked_{assembly}/Homo_sapiens.{assembly}.dna.toplevel.fa.out",
-            "repeatmasked_{assembly}/Homo_sapiens.{assembly}.dna.toplevel.fa.out.gff",
-            "repeatmasked_{assembly}/Homo_sapiens.{assembly}.dna.toplevel.fa.out.html",
-            "repeatmasked_{assembly}/Homo_sapiens.{assembly}.dna.toplevel.fa.tbl"
-    threads: 24
+    input: "seq_{assembly}/Homo_sapiens.{assembly}.dna.{chr_or_type}.fa"
+    output: "repeatmasked_{assembly}/Homo_sapiens.{assembly}.dna.{chr_or_type}.fa.masked",
+            "repeatmasked_{assembly}/Homo_sapiens.{assembly}.dna.{chr_or_type}.fa.tbl"
+    threads: 12
     conda: "envs/repeatmasker.yaml"
     shell: "workdir=$PWD; cd /scratch; " + \
            "rm -rf /scratch/repeatmasked_{wildcards.assembly}; " + \
            "mkdir /scratch/repeatmasked_{wildcards.assembly}; " + \
-           "RepeatMasker -species mammalia " + \
+           "RepeatMasker -species human " + \
            "             -dir /scratch/repeatmasked_{wildcards.assembly} " + \
-           "             -pa 24 " + \
+           "             -pa 12 " + \
            "             -xsmall " + \
            "             -q " + \
            "             -html " + \
@@ -240,8 +255,30 @@ rule run_repeatmasker:
            "rsync -avz /scratch/repeatmasked_{wildcards.assembly} .; " + \
            "rm -rf /scratch/repeatmasked_{wildcards.assembly}; "
 
-rule run_repeatmasker_all:
-    input: "repeatmasked_GRCh38/Homo_sapiens.GRCh38.dna.toplevel.fa.tbl",
-           "repeatmasked_EGYPTREF/Homo_sapiens.EGYPTREF.dna.toplevel.fa.tbl"
+# Running repeatmasker on the primary assembly ...
+rule run_repeatmasker_primary_assembly:
+    input: "repeatmasked_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.tbl",
+           "repeatmasked_EGYPTREF/Homo_sapiens.EGYPTREF.dna.primary_assembly.fa.tbl"
+
+# ... and on the individual scaffolds
+rule run_repeatmasker_chromosomewise:
+    input: expand("repeatmasked_GRCh38/Homo_sapiens.GRCh38.dna.{x}.fa.tbl", \
+                  x=CHR_GRCh38),
+           expand("repeatmasked_EGYPTREF/Homo_sapiens.EGYPTREF.dna.{x}.fa.tbl", \
+                  x=EGYPT_SCAFFOLDS)
+
+# Writing the scaffolds of the Egyptian genome to separate fasta files because
+# processing the whole assembly often takes too much time
+rule write_scaffold_fastas:
+    input: "data/pilon.fasta"
+    output: expand("seq_EGYPTREF/Homo_sapiens.EGYPTREF.dna.{scaffold}.fa", \
+                   scaffold = EGYPT_SCAFFOLDS)
+    run:
+        with open(input[0], "r") as f_in:
+            i = 0
+            for record in SeqIO.parse(f_in,"fasta"):            
+                with open(output[i], "w") as f_out:
+                    SeqIO.write(record, f_out, "fasta")
+                    i += 1
             
 
