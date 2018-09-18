@@ -242,18 +242,18 @@ rule run_repeatmasker:
     threads: 12
     conda: "envs/repeatmasker.yaml"
     shell: "workdir=$PWD; cd /scratch; " + \
-           "rm -rf /scratch/repeatmasked_{wildcards.assembly}; " + \
-           "mkdir /scratch/repeatmasked_{wildcards.assembly}; " + \
+           "rm -rf /scratch/repeatmasked_{wildcards.assembly}_{wildcards.chr_or_type}; " + \
+           "mkdir -p /scratch/repeatmasked_{wildcards.assembly}_{wildcards.chr_or_type}; " + \
            "RepeatMasker -species human " + \
-           "             -dir /scratch/repeatmasked_{wildcards.assembly} " + \
+           "             -dir /scratch/repeatmasked_{wildcards.assembly}_{wildcards.chr_or_type} " + \
            "             -pa 12 " + \
            "             -xsmall " + \
            "             -q " + \
            "             -html " + \
            "             -gff $workdir/{input}; " + \
            "cd $workdir; "
-           "rsync -avz /scratch/repeatmasked_{wildcards.assembly} .; " + \
-           "rm -rf /scratch/repeatmasked_{wildcards.assembly}; "
+           "rsync -avz /scratch/repeatmasked_{wildcards.assembly}_{wildcards.chr_or_type}/ repeatmasked_{wildcards.assembly}/; " + \
+           "rm -rf /scratch/repeatmasked_{wildcards.assembly}_{wildcards.chr_or_type}; "
 
 # Running repeatmasker on the primary assembly ...
 rule run_repeatmasker_primary_assembly:
@@ -272,7 +272,7 @@ rule run_repeatmasker_chromosomewise:
 rule write_scaffold_fastas:
     input: "data/pilon.fasta"
     output: expand("seq_EGYPTREF/Homo_sapiens.EGYPTREF.dna.{scaffold}.fa", \
-                   scaffold = EGYPT_SCAFFOLDS)
+                   scaffold=EGYPT_SCAFFOLDS)
     run:
         with open(input[0], "r") as f_in:
             i = 0
@@ -281,4 +281,25 @@ rule write_scaffold_fastas:
                     SeqIO.write(record, f_out, "fasta")
                     i += 1
             
+# Computing genome alignments using lastz
+# [unmask] Attaching this to the chromosome filename instructs lastz to ignore 
+# masking information and treat repeats the same as any other part of the 
+# chromosome
+rule align_with_lastz:
+    input: "repeatmasked_GRCh38/Homo_sapiens.GRCh38.dna.{chr}.fa.masked",
+           "repeatmasked_EGYPTREF/Homo_sapiens.EGYPTREF.dna.{scaffold}.fa.masked"
+    output: "alignments_lastz/{chr}_vs_{scaffold}.maf",
+            "alignments_lastz/{chr}_vs_{scaffold}.rdotplot"
+    conda: "envs/lastz.yaml"
+    shell: "lastz {input[0]}[unmask] {input[1]}[unmask] --notransition " + \
+                                  "--step=20 " + \
+                                  "--nogapped " + \
+                                  "--format=maf " + \
+                                  "--rdotplot={output[1]}"
+                                  ">{output[0]}"
+
+# All versus all comparisons of reference and Egyptian genome
+rule align_all_vs_all:
+    input: expand("alignments_lastz/{chr}_vs_{scaffold}.maf", \
+                  chr=CHR_GRCh38, scaffold=EGYPT_SCAFFOLDS)
 
