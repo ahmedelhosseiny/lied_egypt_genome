@@ -221,6 +221,11 @@ rule write_scaffold_fastas:
 # [unmask] Attaching this to the chromosome filename instructs lastz to ignore 
 # masking information and treat repeats the same as any other part of the 
 # chromosome
+# Parameters used for quick and dirty, alignment (lastz manual), taking minutes
+# --notransition Don't allow any match positions in seeds to be satisified by 
+#                transitions (lowers seeding sensitivity and reduces runtime)
+# --nogapped Eliminates the computation of gapped alignments
+# --step 20 Lowers seeding senitivity reducing runtime and memory (factor 3.3)
 # Parameters from the Korean reference genome AK1 (Seo et al. 2016)
 # --gapped Perform gapped extension of HSPs after first reducing them to anchor 
 #          points
@@ -230,10 +235,11 @@ rule write_scaffold_fastas:
 # --seed 12of19 Seeds require a 19bp word with matches in 12 specific positions
 # --notransition Don't allow any match positions in seeds to be satisified by 
 #                transitions
-# --ydrop=15000-chain Set the threshold for terminating gapped extension; this
-#                     restricts the endpoints of each local alignment by 
-#                     limiting the local region around each anchor in which 
-#                     extension is performed
+# --ydrop=15000 Set the threshold for terminating gapped extension; this
+#               restricts the endpoints of each local alignment by 
+#               limiting the local region around each anchor in which 
+#               extension is performed
+# --chain Perform chaining of HSPs with no penalties
 # Parameters from another Korean reference genome, KOREF (Cho et al. 2016)
 # --step 19 Offset between the starting positins of successive target words 
 #           considered for potential seeds
@@ -244,19 +250,21 @@ rule write_scaffold_fastas:
 # --seed 12of19 Seeds require a 19bp word with matches in 12 specific positions
 # --minScore 3000 ? kenttools?
 # --linearGap medium ? kenttools?
-rule align_with_lastz_quick:
+rule align_with_lastz:
     input: "repeatmasked_GRCh38/Homo_sapiens.GRCh38.dna.{chr}.fa.masked",
            "repeatmasked_EGYPTREF/Homo_sapiens.EGYPTREF.dna.{scaffold}.fa.masked"
     output: "alignments_lastz/dotplots/{chr}_vs_{scaffold}.maf",
             "alignments_lastz/dotplots/{chr}_vs_{scaffold}.rdotplot"
     conda: "envs/lastz.yaml"
     shell: "lastz {input[0]} {input[1]} " + \
-                                  "--notransition " + \
-                                  "--step=20 " + \
-                                  "--nogapped " + \
-                                  "--format=maf " + \
+                                  "--gapped " + \
+                                  "--gap=600,150 " + \
                                   "--hspthresh=4500 " + \
                                   "--seed=12of19 " + \
+                                  "--notransition " + \
+                                  "--ydrop=15000 " + \
+                                  "--chain " + \
+                                  "--format=maf " + \
                                   "--rdotplot={output[1]} " + \
                                   ">{output[0]}"
 
