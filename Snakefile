@@ -5,6 +5,7 @@
 #######################################
 
 from Bio import SeqIO
+import os
 
 
 # Chromosome and scaffold names for later use
@@ -253,8 +254,8 @@ rule write_scaffold_fastas:
 rule align_with_lastz:
     input: "repeatmasked_GRCh38/Homo_sapiens.GRCh38.dna.{chr}.fa.masked",
            "repeatmasked_EGYPTREF/Homo_sapiens.EGYPTREF.dna.{scaffold}.fa.masked"
-    output: "alignments_lastz/dotplots/{chr}_vs_{scaffold}.maf",
-            "alignments_lastz/dotplots/{chr}_vs_{scaffold}.rdotplot"
+    output: "align_lastz_GRCh38_vs_EGYPTREF/{chr}_vs_{scaffold}.maf",
+            "align_lastz_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.rdotplot"
     conda: "envs/lastz.yaml"
     shell: "lastz {input[0]} {input[1]} " + \
                                   "--gapped " + \
@@ -270,24 +271,58 @@ rule align_with_lastz:
 
 # Plot the dotplot output of lastz
 rule individual_lastz_dotplot:
-    input: "alignments_lastz/dotplots/{chr}_vs_{scaffold}.rdotplot"
-    output: "alignments_lastz/dotplots/{chr}_vs_{scaffold}.pdf"
+    input: "align_lastz_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.rdotplot"
+    output: "align_lastz_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.pdf"
     script: "scripts/dotplot.R"
 
 # Plotting for one scaffold the dotplot versus all chromosomes
 rule dotplots_scaffold_vs_chromosomes:
-    input: expand("alignments_lastz/dotplots/{chr}_vs_{{scaffold}}.rdotplot", \
+    input: expand("align_lastz_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{{scaffold}}.rdotplot", \
                   chr=CHR_GRCh38)
-    output: "alignments_lastz/dotplots/{scaffold}.pdf"
+    output: "align_lastz_GRCh38_vs_EGYPTREF/dotplots/{scaffold}.pdf"
     script: "scripts/scaffold_vs_grch38.R"            
 
 # Plotting the dotplots for all scaffolds
 rule dotplots_scaffold_vs_chromosomes_all:
-    input: expand("alignments_lastz/dotplots/{scaffold}.pdf", \
+    input: expand("align_lastz_GRCh38_vs_EGYPTREF/dotplots/{scaffold}.pdf", \
                   scaffold=EGYPT_SCAFFOLDS)
 
 # All versus all comparisons of reference and Egyptian genome
 rule align_all_vs_all:
-    input: expand("alignments_lastz/{chr}_vs_{scaffold}.maf", \
+    input: expand("align_lastz_GRCh38_vs_EGYPTREF/{chr}_vs_{scaffold}.maf", \
                   chr=CHR_GRCh38, scaffold=EGYPT_SCAFFOLDS)
+
+# Computing the GRCh38 recovery rate using the mafTools package 
+# (as in Cho et al.). Using mafTools program mafPairCoverage, it is necessary
+# to first combine all chromosome/scaffold maf files, and then run 
+# mafTransitiveClosure
+rule combine_maf_files_for_recovery:
+    input: expand("align_lastz_GRCh38_vs_EGYPTREF/{chr}_vs_{scaffold}.maf", \
+                  chr=CHR_GRCh38, scaffold=EGYPT_SCAFFOLDS)
+    output: "align_lastz_GRCh38_vs_EGYPTREF/recovery/all_alignments.maf"
+    run: 
+        shell("cat {input[0]} > {output}")
+        for filename in input[1:]:
+            # Append to large file; some file only have comments, no alignments
+            # therefore we need to add & true because other wise the exit code
+            # would indicate an error
+            shell("cat {filename} | grep -v '#' >> {output} & true")
+
+rule transitive_closure:
+    input: "align_lastz_GRCh38_vs_EGYPTREF/recovery/all_alignments.maf"
+    output: "align_lastz_GRCh38_vs_EGYPTREF/recovery/all_transclos.maf"
+    shell: "./ext_tools/mafTools/bin/mafPairCoverage " + \
+           "--maf --seq1 1 --seq2 * {input} > {output}"
+
+rule maftools_coverage:
+    input: "align_lastz_GRCh38_vs_EGYPTREF/recovery/all_transclos.maf"
+    output: "align_lastz_GRCh38_vs_EGYPTREF/recovery/all.coverage"
+    shell: "./ext_tools/mafTools/bin/mafPairCoverage " + \
+           "--maf {input} > {output}"
+
+rule recovery:
+    input: "align_lastz_GRCh38_vs_EGYPTREF/recovery/all.coverage"
+    output: "align_lastz_GRCh38_vs_EGYPTREF/recovery/recovery.txt"
+    run:
+        pass
 
