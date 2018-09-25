@@ -204,6 +204,20 @@ rule run_repeatmasker_chromosomewise:
            expand("repeatmasked_EGYPTREF/Homo_sapiens.EGYPTREF.dna.{x}.fa.tbl", \
                   x=EGYPT_SCAFFOLDS)
 
+# Summarising the chromosome-wise repeatmasker summary files for Egyptref
+rule repeatmasker_summary_table_egyptref:
+    input: expand("repeatmasked_EGYPTREF/Homo_sapiens.EGYPTREF.dna.{x}.fa.tbl", \
+                  x=EGYPT_SCAFFOLDS)
+    output: "repeatmasked_EGYPTREF/summary.txt"
+    script: "scripts/repeatmasker_summary.py"
+
+# Summarising the chromosome-wise repeatmasker summary files for GRCh38
+rule repeatmasker_summary_table_grch38:
+    input: expand("repeatmasked_GRCh38/Homo_sapiens.GRCh38.dna.{x}.fa.tbl", \
+                  x=CHR_GRCh38)
+    output: "repeatmasked_GRCh38/summary.txt"
+    script: "scripts/repeatmasker_summary.py"
+
 # Writing the scaffolds of the Egyptian genome to separate fasta files because
 # processing the whole assembly often takes too much time
 rule write_scaffold_fastas:
@@ -221,7 +235,7 @@ rule write_scaffold_fastas:
 # Computing genome alignments using lastz
 # [unmask] Attaching this to the chromosome filename instructs lastz to ignore 
 # masking information and treat repeats the same as any other part of the 
-# chromosome
+# chromosome -> We do NOT want this, alignments will be crappy with it!!
 # Parameters used for quick and dirty, alignment (lastz manual), taking minutes
 # --notransition Don't allow any match positions in seeds to be satisified by 
 #                transitions (lowers seeding sensitivity and reduces runtime)
