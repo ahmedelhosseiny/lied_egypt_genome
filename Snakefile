@@ -306,6 +306,38 @@ rule align_all_vs_all:
     input: expand("align_lastz_GRCh38_vs_EGYPTREF/{chr}_vs_{scaffold}.maf", \
                   chr=CHR_GRCh38, scaffold=EGYPT_SCAFFOLDS)
 
+# Genome alignments using mummer4
+rule align_with_mummer:
+    input: "repeatmasked_GRCh38/Homo_sapiens.GRCh38.dna.{chr}.fa.masked",
+           "repeatmasked_EGYPTREF/Homo_sapiens.EGYPTREF.dna.{scaffold}.fa.masked"
+    output: "align_mummer_GRCh38_vs_EGYPTREF/{chr}_vs_{scaffold}.delta"
+    conda: "envs/mummer.yaml"
+    shell: "nucmer " + \
+           "-p align_mummer_GRCh38_vs_EGYPTREF/{wildcards.chr}_vs_{wildcards.scaffold} " + \
+           "{input[0]} {input[1]}"
+
+rule plot_mummer:
+    input: "align_mummer_GRCh38_vs_EGYPTREF/{chr}_vs_{scaffold}.delta"
+    output: "align_mummer_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.gp",
+            "align_mummer_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.rplot",
+            "align_mummer_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.fplot"
+    conda: "envs/mummer.yaml"
+    shell: "mummerplot " + \
+           "--postscript " + \
+           "-p align_mummer_GRCh38_vs_EGYPTREF/dotplots/{wildcards.chr}_vs_{wildcards.scaffold} " + \
+           "{input[0]}"
+
+rule rdotplot_from_mummer_plot:
+    input: "align_mummer_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.rplot",
+           "align_mummer_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.fplot"
+    output: "align_mummer_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.rdotplot"
+    shell: "cat {input} > {output}"
+
+# All versus all comparisons of reference and Egyptian genome
+rule align_all_vs_all_mummer:
+    input: expand("align_mummer_GRCh38_vs_EGYPTREF/{chr}_vs_{scaffold}.delta", \
+                  chr=CHR_GRCh38, scaffold=EGYPT_SCAFFOLDS)
+
 # Computing the GRCh38 recovery rate using the mafTools package 
 # (as in Cho et al.). Using mafTools program mafPairCoverage, it is necessary
 # to first combine all chromosome/scaffold maf files, and then run 

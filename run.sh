@@ -14,7 +14,7 @@ fi
 source activate workflow_lied_egypt_genome
 
 echo "RUNNING SNAKEMAKE WORKFLOW..."
-snakemake -k -j 48 --resources io=4 --use-conda --jobname "{jobid}.{rulename}.sh" --cluster "sbatch --mem 32G --partition=longterm --time 5-00:00:00 -c 8 -o log/%j.{rule}.log" --printshellcmds run_busco_chromosomewise
+snakemake -n -k -j 48 --resources io=4 --use-conda --jobname "{jobid}.{rulename}.sh" --cluster "sbatch --mem 16G --partition=longterm --time 2-00:00:00 -c 4 -o log/%j.{rule}.log" --printshellcmds align_all_vs_all_mummer
 
 source deactivate
 conda list -n workflow_lied_egypt_genome --export > environment_versions.yaml
