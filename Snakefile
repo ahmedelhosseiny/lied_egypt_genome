@@ -317,26 +317,61 @@ rule align_with_mummer:
            "{input[0]} {input[1]}"
 
 rule plot_mummer:
-    input: "align_mummer_GRCh38_vs_EGYPTREF/{chr}_vs_{scaffold}.delta"
+    input: "align_mummer_GRCh38_vs_EGYPTREF/{chr}_vs_{scaffold}.filter"
     output: "align_mummer_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.gp",
             "align_mummer_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.rplot",
-            "align_mummer_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.fplot"
+            "align_mummer_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.fplot",
+            "align_mummer_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.ps"
     conda: "envs/mummer.yaml"
     shell: "mummerplot " + \
            "--postscript " + \
            "-p align_mummer_GRCh38_vs_EGYPTREF/dotplots/{wildcards.chr}_vs_{wildcards.scaffold} " + \
-           "{input[0]}"
-
-rule rdotplot_from_mummer_plot:
-    input: "align_mummer_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.rplot",
-           "align_mummer_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.fplot"
-    output: "align_mummer_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.rdotplot"
-    shell: "cat {input} > {output}"
+           "{input[0]}; " + \
+           "gnuplot {output[0]}"
 
 # All versus all comparisons of reference and Egyptian genome
 rule align_all_vs_all_mummer:
     input: expand("align_mummer_GRCh38_vs_EGYPTREF/{chr}_vs_{scaffold}.delta", \
                   chr=CHR_GRCh38, scaffold=EGYPT_SCAFFOLDS)
+
+# All versus all dotplots of reference and Egyptian genome
+rule all_vs_all_dotplots_mummer:
+    input: expand("align_mummer_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.gp", \
+                  chr=CHR_GRCh38, scaffold=EGYPT_SCAFFOLDS)
+
+# Plotting for one scaffold the dotplot versus all chromosomes
+#rule mummer_dotplots_scaffold_vs_chromosomes:
+#    input: expand("align_mummer_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{{scaffold}}.ps", \
+#                  chr=CHR_GRCh38)
+#    output: "align_mummer_GRCh38_vs_EGYPTREF/dotplots/{scaffold}.ps",
+#            "align_mummer_GRCh38_vs_EGYPTREF/dotplots/{scaffold}.pdf"
+#    run: 
+        # Putting 5 plots together horizontal; needs to be done 5 times
+#        for h in range(5):
+#            files_horizontal_merge = " ".join(input[h*5:h*2*h*5])
+#            shell("convert "+files_horizontal_merge+" +append "+output[0]+str(h))
+        # Putting the 5 horizontal plots together vertically
+#        files_vertical_merge = " ".join([output[0]+str(h) for h in range(5)])
+#        shell("convert "+files_vertical_merge+" -append "+output[0])
+#        shell("convert {output[0]} {output[1]}")
+
+# Plotting the dotplots for all scaffolds
+rule mummer_dotplots_scaffold_vs_chromosomes_all:
+    input: expand("align_lastz_GRCh38_vs_EGYPTREF/dotplots/{scaffold}.pdf", \
+                  scaffold=EGYPT_SCAFFOLDS)
+
+# Filtering the mummer alignments: Query sequences can be mapped to reference 
+# sequences with -q, this allows the user to exclude chance and repeat 
+# alignments, leaving only the best alignments between the two data sets (i.e.
+# use the -q option for mapping query contigs to their best reference location)
+# -u: float; Set the minimum alignment uniqueness, i.e. percent of the alignment 
+#     matching to unique reference AND query sequence [0, 100], default 0
+# -l: int; Set the minimum alignment length, default 0
+rule delta_filter_mummer:
+    input: "align_mummer_GRCh38_vs_EGYPTREF/{chr}_vs_{scaffold}.delta"
+    output: "align_mummer_GRCh38_vs_EGYPTREF/{chr}_vs_{scaffold}.filter"
+    conda: "envs/mummer.yaml"
+    shell: "delta-filter -l 10000 -u 0 -q {input} > {output}"
 
 # Computing the GRCh38 recovery rate using the mafTools package 
 # (as in Cho et al.). Using mafTools program mafPairCoverage, it is necessary
@@ -372,3 +407,72 @@ rule recovery:
     run:
         pass
 
+
+# Processing Illumina PE data
+
+# The Illumina library sample names
+ILLUMINA_SAMPLES = ["NDES00177","NDES00178","NDES00179","NDES00180","NDES00181"]
+ILLUMINA_SAMPLES_TO_LANES = {
+    "NDES00177": [4,5,6,7],
+    "NDES00178": [1,4,5,6,7],
+    "NDES00179": [4,5,6,7],
+    "NDES00180": [1,4,5,6,7],
+    "NDES00181": [4,5,6,7]
+}
+ILLUMINA_LIBS = []
+for sample in ILLUMINA_SAMPLES:
+    ILLUMINA_LIBS += [sample+"_L"+str(x) for x in \
+                      ILLUMINA_SAMPLES_TO_LANES[sample]]
+
+# Mapping the Illumina PE data to the scaffolds
+# -a STR: Algorithm for constructing BWT index. Chosen option: 
+#         bwtsw: Algorithm implemented in BWT-SW. This method works with the 
+#         whole human genome.
+# -p STR: Prefix of the output database [same as db filename] 
+rule bwa_index:
+    input: "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa"
+    output: "bwa_index/Homo_sapiens.{assembly}.dna.primary_assembly.amb",
+            "bwa_index/Homo_sapiens.{assembly}.dna.primary_assembly.ann",
+            "bwa_index/Homo_sapiens.{assembly}.dna.primary_assembly.bwt",
+            "bwa_index/Homo_sapiens.{assembly}.dna.primary_assembly.pac",
+            "bwa_index/Homo_sapiens.{assembly}.dna.primary_assembly.sa"
+    conda: "envs/bwa.yaml"
+    shell: "bwa index -a bwtsw " + \
+                     "-p bwa_index/Homo_sapiens." + \
+                     "{wildcards.assembly}.dna.primary_assembly " + \
+                     "{input}"
+
+rule bwa_index_all:
+    input: expand("bwa_index/Homo_sapiens.{assembly}.dna.primary_assembly.sa", \
+                  assembly=["EGYPTREF","GRCh38"])
+
+rule bwa_mem:
+    input: index = "bwa_index/Homo_sapiens.{assembly}.dna.primary_assembly.sa",
+           fastq_r1 = "data/02.DES/{lib}_1.fq.gz",
+           fastq_r2 = "data/02.DES/{lib}_2.fq.gz"
+    output: "map_bwa_{assembly}/{lib}.bam"
+    shell: "bwa mem -t 48 " + \
+           "bwa_index/Homo_sapiens.{wildcards.assembly}.dna.primary_assembly "+\
+           "{input.fastq_r1} {input.fastq_r2} " + \
+           " | samtools sort -@48 -o {output} -"
+
+rule bwa_mem_all:
+    input: expand("map_bwa_{assembly}/{lib}.bam", \
+                  assembly=["EGYPTREF","GRCh38"], lib=ILLUMINA_LIBS)
+
+# For SNP calling and other things that are done for the Illumnin PE data
+rule symlink_illumina_wgs_dir:
+    output: directory("data/02.DES")
+    shell: "ln -s /data/lied_egypt_genome/raw/02.DES {output}"
+
+# Some QC: Here, fastqc for all Illumina PE WGS files
+rule run_fastqc:
+    input: "data/02.DES/{lib}_{read}.fq.gz"
+    output: html="illumina_qc/fastqc/{lib}_{read}_fastqc.html",
+            zip="illumina_qc/fastqc/{lib}_{read}_fastqc.zip"
+    conda: "envs/fastqc.yaml"
+    shell: "fastqc --outdir illumina_qc/fastqc/ {input[0]}"
+
+rule run_fastqc_all:
+    input: expand("illumina_qc/fastqc/{lib}_{read}_fastqc.html", lib=ILLUMINA_LIBS, \
+                                                          read=["1","2"])
