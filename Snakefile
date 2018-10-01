@@ -76,7 +76,8 @@ rule extract_lineage:
 rule run_busco:
     input: "busco_lineage/mammalia_odb9/lengths_cutoff",
            "seq_{assembly}/Homo_sapiens.{assembly}.dna.{chr_or_type}.fa"
-    output: "busco_{assembly}/run_busco_{assembly}_{chr_or_type}/short_summary_busco_{assembly}_{chr_or_type}.txt"
+    output: "busco_{assembly}/run_busco_{assembly}_{chr_or_type}/short_summary_busco_{assembly}_{chr_or_type}.txt",
+            "busco_{assembly}/run_busco_{assembly}_{chr_or_type}/full_table_busco_{assembly}_{chr_or_type}.tsv",
     threads: 12
     conda: "envs/busco.yaml"
     shell:  "workdir=$PWD; cd /scratch; " + \
@@ -110,6 +111,20 @@ rule run_busco_chromosomewise:
                   scaffolds=EGYPT_SCAFFOLDS),
            expand("busco_GRCh38/run_busco_GRCh38_{chrom}/short_summary_busco_GRCh38_{chrom}.txt", \
                   chrom=CHR_GRCh38)
+
+# Make a comparison table for the busco analysis for EGYPTREF
+rule summary_busco_egyptref:
+    input: expand("busco_EGYPTREF/run_busco_EGYPTREF_{scaffolds}/full_table_busco_EGYPTREF_{scaffolds}.tsv", \
+                  scaffolds=EGYPT_SCAFFOLDS)
+    output: "busco_EGYPTREF/busco_summary.txt"
+    script: "scripts/busco_summary.py"
+
+# Make a comparison table for the busco analysis for GRCh38
+rule summary_busco_grch38:
+    input: expand("busco_GRCh38/run_busco_GRCh38_{chrom}/full_table_busco_GRCh38_{chrom}.tsv", \
+                  chrom=CHR_GRCh38)
+    output: "busco_GRCh38/busco_summary.txt"
+    script: "scripts/busco_summary.py"
 
 # Downloading all GRCh38 sequence data available from Ensembl (release 93,
 # but note, that on sequence level, the release shouldn't make a difference)
