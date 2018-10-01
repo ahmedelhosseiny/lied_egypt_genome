@@ -218,6 +218,14 @@ rule repeatmasker_summary_table_grch38:
     output: "repeatmasked_GRCh38/summary.txt"
     script: "scripts/repeatmasker_summary.py"
 
+# Making a repeatmasker stat table over all chromosomes, one line for EGYPTREF,
+# one line for GRCh38
+rule comparison_repeatmasker:
+    input: expand("repeatmasked_{assembly}/summary.txt", \
+                  assembly=["EGYPTREF","GRCh38"])
+    output: "results/repeatmasker_comparison.txt"
+    script: "scripts/repeatmasker_comparison.py"
+
 # Writing the scaffolds of the Egyptian genome to separate fasta files because
 # processing the whole assembly often takes too much time
 rule write_scaffold_fastas:
