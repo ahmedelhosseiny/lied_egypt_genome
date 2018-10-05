@@ -499,3 +499,283 @@ rule run_fastqc:
 rule run_fastqc_all:
     input: expand("illumina_qc/fastqc/{lib}_{read}_fastqc.html", lib=ILLUMINA_LIBS, \
                                                           read=["1","2"])
+
+################################################################################
+################### SNP Calling for 9 Egyptian individuals #####################
+################################################################################
+
+# If possible, the variant calling (vc) tasks are performed with 8 threads and
+# with 35Gb of memory, such that 5 tasks can be run on a node in parallel
+
+# These are the sample IDs
+EGYPT_SAMPLES = ["LU18","LU19","LU2","LU22","LU23","LU9","PD114","PD115","PD82","TEST"]
+
+# These are additional IDs after the sample IDs, given by Novogene, e.g 
+# H75TCDMXX is the ID of the sequencer, L1 is the first lane
+EGYPT_SAMPLES_TO_PREPLANES = {
+    "LU18":  ["NDHG02363_H75HVDMXX_L1", "NDHG02363_H75TCDMXX_L1", \
+              "NDHG02363_H75HVDMXX_L2", "NDHG02363_H75TCDMXX_L2", \
+              "NDHG02363_H75FVDMXX_L1", "NDHG02363_H75FVDMXX_L2"],
+    "LU19":  ["NDHG02358_H7777DMXX_L1", "NDHG02358_H7777DMXX_L2"],
+    "LU2":   ["NDHG02365_H75FVDMXX_L1", "NDHG02365_H75FVDMXX_L1"],
+    "LU22":  ["NDHG02364_H75LLDMXX_L1", "NDHG02364_H75LLDMXX_L2"],
+    "LU23":  ["NDHG02366_H75FVDMXX_L1", "NDHG02366_H75FVDMXX_L2"],
+    "LU9":   ["NDHG02362_H772LDMXX_L1", "NDHG02362_H772LDMXX_L2"],
+    "PD114": ["NDHG02360_H772LDMXX_L1", "NDHG02360_H772LDMXX_L2"],
+    "PD115": ["NDHG02361_H772LDMXX_L1", "NDHG02361_H772LDMXX_L2"],
+    "PD82":  ["NDHG02359_H772LDMXX_L1", "NDHG02359_H772LDMXX_L2"],
+    "TEST":  ["PROTOCOL_SEQUENCER_L1", "PROTOCOL_SEQUENCER_L2"] # the last is for testing purposes
+}
+
+# Symlinking the raw data directory
+rule symlink_data_for_variant_detection:
+    output: directory("data/raw_data")
+    shell: "ln -s /data/lied_egypt_genome/raw_data {output}"
+
+# Getting the latest dbsnp version for GRCh38, this is version 151; I am 
+# getting the VCF file deposited under GATK, which is very slightly larger than
+# the file under VCF, but I didn't check the precise difference and there is 
+# no note in the READMEs.
+rule get_known_snps_from_dbsnp:
+    output: "dbsnp_GRCh38/All_20180418.vcf.gz"
+    shell: "wget -P dbsnp_GRCh38 " + \
+           "ftp://ftp.ncbi.nlm.nih.gov/snp/organisms/human_9606/VCF/GATK/All_20180418.vcf.gz"
+
+# ... and getting its index
+rule get_index_of_known_snps_from_dbsnp:
+    output: "dbsnp_GRCh38/All_20180418.vcf.gz.tbi"
+    shell: "wget -P dbsnp_GRCh38 " + \
+           "ftp://ftp.ncbi.nlm.nih.gov/snp/organisms/human_9606/VCF/GATK/All_20180418.vcf.gz.tbi"
+
+### 1. map reads to genome
+# Mapping to reference/assembly using bwa
+rule vc_bwa_mem:
+    input: index = "bwa_index/Homo_sapiens.{assembly}.dna.primary_assembly.sa",
+           fastq_r1 = "data/raw_data/{sample}/{sample}_{infolane}_1.fq.gz",
+           fastq_r2 = "data/raw_data/{sample}/{sample}_{infolane}_2.fq.gz"
+    output: "variants_{assembly}/{sample}_{infolane}.sam"
+    wildcard_constraints: sample="[A-Z,0-9]+", infolane="[A-Z,0-9,_]+"
+    conda: "envs/variant_calling.yaml"
+    shell: "bwa mem -t 8 " + \
+           "bwa_index/Homo_sapiens.{wildcards.assembly}.dna.primary_assembly " + \
+           "{input.fastq_r1} {input.fastq_r2} > {output}"
+
+### 2. CleanSam
+# Cleans the provided SAM/BAM, soft-clipping beyond-end-of-reference alignments 
+# and setting MAPQ to 0 for unmapped reads
+# java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar share/picard-2.18.9-0/picard.jar
+rule vc_clean_sam:
+    input: "variants_{assembly}/{sample}_{infolane}.sam"
+    output: "variants_{assembly}/{sample}_{infolane}.cleaned.sam"
+    conda: "envs/variant_calling.yaml"
+    shell: "picard CleanSam " + \
+           "I={input} " + \
+           "O={output}"
+
+### 3. Sort Sam -> output: bam + idx
+# Sorting by coordinates, making an index and outputting as bam
+rule vc_sort_and_index_sam:
+    input: "variants_{assembly}/{sample}_{infolane}.cleaned.sam"
+    output: "variants_{assembly}/{sample}_{infolane}.cleaned.bam"
+    conda: "envs/variant_calling.yaml"
+    shell: "picard SortSam " + \
+           "I={input} " + 
+           "O={output} " + \
+           "SORT_ORDER=coordinate " + \
+           "CREATE_INDEX=true"
+
+### 4. Fix Mate Pair Information
+# verify mate-pair information between mates and fix if needed
+rule vc_fix_mates:
+    input: "variants_{assembly}/{sample}_{infolane}.cleaned.bam"
+    output: "variants_{assembly}/{sample}_{infolane}.fixed.bam"
+    conda: "envs/variant_calling.yaml"
+    shell: "picard FixMateInformation " + \
+           "I={input} " + \
+           "O={output} " + \
+           "SORT_ORDER=coordinate " + \
+           "CREATE_INDEX=true"
+
+### 5. Mark Duplicates
+rule vc_mark_duplicates:
+    input: "variants_{assembly}/{sample}_{infolane}.fixed.bam"
+    output: "variants_{assembly}/{sample}_{infolane}.rmdup.bam",
+            "variants_{assembly}/{sample}_{infolane}.rmdup.txt"
+    conda: "envs/variant_calling.yaml"
+    shell: "picard " + \
+           "MarkDuplicates " + \
+           "I={input} " + \
+           "O={output[0]} " + \
+           "M={output[1]} " + \
+           "REMOVE_DUPLICATES=true "+ \
+           "ASSUME_SORTED=coordinate " + \
+           "CREATE_INDEX=true"
+
+### 6. merge *.bam files
+# Merging all bam Files for a sample
+rule vc_merge_bams_per_sample:
+    input: lambda wildcards: \
+           expand("variants_{assembly}/{sample}_{infolane}.rmdup.bam", \
+           assembly = wildcards.assembly, \
+           sample=wildcards.sample, \
+           infolane = EGYPT_SAMPLES_TO_PREPLANES[wildcards.sample])
+    output: "variants_{assembly}/{sample}.merged.bam"
+    params:
+        picard_in=lambda wildcards, input: "I="+" I=".join(input)
+    conda: "envs/variant_calling.yaml"
+    shell: "picard " + \
+           "MergeSamFiles " + \
+           "{params.picard_in} " + \
+           "O={output} " + \
+           "SORT_ORDER=coordinate " + \
+           "CREATE_INDEX=true " + \
+           "USE_THREADING=8"
+
+### 7. Collect Alignment Summary Metrics
+rule vc_alignment_metrics:
+    input: "variants_{assembly}/{sample}.merged.bam"
+    output: "variants_{assembly}/{sample}.stats.txt"
+    conda: "envs/variant_calling.yaml"
+    shell: "picard " + \
+           "CollectAlignmentSummaryMetrics " + \
+           "I={input} " + \
+           "O={output}"
+
+### 8. Replace Read Groups
+rule vc_replace_read_groups:
+    input: "variants_{assembly}/{sample}.merged.bam"
+    output: "variants_{assembly}/{sample}.merged.rg.bam"
+    conda: "envs/variant_calling.yaml"
+    shell: "picard " + \
+           "AddOrReplaceReadGroups " + \
+           "I={input} " + \
+           "O={output} " + \
+           "RGID={wildcards.sample} " + \
+           "RGPL=illumina " + \
+           "RGLB={wildcards.sample} " + \
+           "RGPU=unit1 " + \
+           "RGSM={wildcards.sample} " + \
+           "CREATE_INDEX=true"
+
+### 9. Realign
+
+# Therefore, generate a sequence dictionary for use with picard tools first
+rule vc_seq_dict:
+    input: "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa"
+    output: "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.dict"
+    conda: "envs/variant_calling.yaml"
+    shell: "picard " + \
+           "CreateSequenceDictionary " + \
+           "R={input} " + \
+           "O={output}"
+
+rule vc_realign:
+    input: "variants_{assembly}/{sample}.merged.rg.bam",
+           "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
+           "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.dict"
+    output: "variants_{assembly}/{sample}.merged.rg.ordered.bam"
+    conda: "envs/variant_calling.yaml"
+    shell: "picard " + \
+           "ReorderSam " + \
+           "I={input[0]} " + \
+           "O={output} " + \
+           "R={input[1]} " + \
+           "CREATE_INDEX=true"
+
+### 10. RealignerTargetCreator
+
+# Therefore, the fasta file needs to be indexed
+rule vc_inex_fasta:
+    input: "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa"
+    output: "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.fai"
+    shell: "samtools faidx {input}"
+
+# java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar
+rule vc_realigner_target_creator:
+    input: "variants_{assembly}/{sample}.merged.rg.ordered.bam",
+           "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
+           "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.fai"
+    output: "variants_{assembly}/{sample}.merged.rg.ordered.bam.intervals"
+    conda: "envs/variant_calling.yaml"
+    shell: "gatk " + \
+           "-T RealignerTargetCreator " + \
+           "-R {input[1]} " + \
+           "-I {input[0]} " + \
+           "-o {output} " + \
+           "-nt 8"
+
+### 11. IndelRealigner
+rule vc_indel_realigner:
+    input: "variants_{assembly}/{sample}.merged.rg.ordered.bam",
+           "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
+           "variants_{assembly}/{sample}.merged.rg.ordered.bam.intervals"
+    output: "variants_{assembly}/{sample}.indels.bam"
+    conda: "envs/variant_calling.yaml"
+    shell: "gatk " + \
+           "-T IndelRealigner " + \
+           "-R \"{input[1]}\" " + \
+           "-I {input[0]} " + \
+           "-targetIntervals {input[2]} " + \
+           "-o {output}"
+
+### 12. Base Quality Recalibration
+rule vc_base_recalibrator:
+    input: "variants_{assembly}/{sample}.indels.bam",
+           "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
+           "dbsnp_{assembly}/All_20180418.vcf.gz",
+           "dbsnp_{assembly}/All_20180418.vcf.gz.tbi"
+    output: "variants_{assembly}/{sample}.indels.recal.csv"
+    conda: "envs/variant_calling.yaml"
+    shell: "gatk " + \
+           "-T BaseRecalibrator " + \
+           "-R {input[1]} " + \
+           "-I {input[0]} " + \
+           "-cov ReadGroupCovariate " + \
+           "-cov QualityScoreCovariate " + \
+           "-cov CycleCovariate " + \
+           "-cov ContextCovariate " + \
+           "-o {output} " + \
+           "-knownSites {input[2]} " + \
+           "-nct 8"
+
+### 13. Print Reads
+rule vc_print_reads:
+    input: "variants_{assembly}/{sample}.indels.bam",
+           "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
+           "variants_{assembly}/{sample}.indels.recal.csv"
+    output: "variants_{assembly}/{sample}.final.bam"
+    conda: "envs/variant_calling.yaml"
+    shell: "gatk " + \
+           "-T PrintReads " + \
+           "-R {input[1]} " + \
+           "-I {input[0]} " + \
+           "-o {output[0]} " + \
+           "-BQSR {input[2]} " + \
+           "-nct 8"
+
+### 14. variant calling with GATK-HC
+# use GATK Haplotypecaller with runtime-optimized settings
+# java -XX:+UseConcMarkSweepGC -XX:ParallelGCThreads=4 -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar gatk 
+rule vc_snp_calling_with_gatk_hc:
+    input: "variants_{assembly}/{sample}.final.bam",
+           "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
+    output: "variants_{assembly}/{sample}.vcf"
+    conda: "envs/variant_calling.yaml"
+    shell: "gatk " + \
+           "-T HaplotypeCaller " + \
+           "-R {input[1]} " + \
+           "-I {input[0]} " + \
+           "--genotyping_mode DISCOVERY " + \
+           "-o {output} " + \
+           "-ERC GVCF " + \
+           "-nct 8"
+
+# Doing the variant calling for all 9 samples
+rule vc_snp_calling_with_gatk_hc_all:
+    input: expand("variants_GRCh38/{sample}.vcf", sample=EGYPT_SAMPLES)
+
+################################################################################
+################### Assembly assessment and correction #########################
+################################################################################
+
+

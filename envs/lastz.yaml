@@ -1,0 +1,4 @@
+channels:
+  - bioconda
+dependencies:
+  - lastz == 1.0.4

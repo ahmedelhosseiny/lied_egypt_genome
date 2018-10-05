@@ -1,0 +1,4 @@
+channels:
+  - bioconda
+dependencies:
+  - tigmint == 1.1.2 
