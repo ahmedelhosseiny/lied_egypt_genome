@@ -568,7 +568,8 @@ rule vc_clean_sam:
     input: "variants_{assembly}/{sample}_{infolane}.sam"
     output: "variants_{assembly}/{sample}_{infolane}.cleaned.sam"
     conda: "envs/variant_calling.yaml"
-    shell: "picard CleanSam " + \
+    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \ 
+           "CleanSam " + \
            "I={input} " + \
            "O={output}"
 
@@ -578,7 +579,8 @@ rule vc_sort_and_index_sam:
     input: "variants_{assembly}/{sample}_{infolane}.cleaned.sam"
     output: "variants_{assembly}/{sample}_{infolane}.cleaned.bam"
     conda: "envs/variant_calling.yaml"
-    shell: "picard SortSam " + \
+    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
+           "SortSam " + \
            "I={input} " + 
            "O={output} " + \
            "SORT_ORDER=coordinate " + \
@@ -590,7 +592,8 @@ rule vc_fix_mates:
     input: "variants_{assembly}/{sample}_{infolane}.cleaned.bam"
     output: "variants_{assembly}/{sample}_{infolane}.fixed.bam"
     conda: "envs/variant_calling.yaml"
-    shell: "picard FixMateInformation " + \
+    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
+           "FixMateInformation " + \
            "I={input} " + \
            "O={output} " + \
            "SORT_ORDER=coordinate " + \
@@ -602,7 +605,7 @@ rule vc_mark_duplicates:
     output: "variants_{assembly}/{sample}_{infolane}.rmdup.bam",
             "variants_{assembly}/{sample}_{infolane}.rmdup.txt"
     conda: "envs/variant_calling.yaml"
-    shell: "picard " + \
+    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
            "MarkDuplicates " + \
            "I={input} " + \
            "O={output[0]} " + \
@@ -623,7 +626,7 @@ rule vc_merge_bams_per_sample:
     params:
         picard_in=lambda wildcards, input: "I="+" I=".join(input)
     conda: "envs/variant_calling.yaml"
-    shell: "picard " + \
+    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
            "MergeSamFiles " + \
            "{params.picard_in} " + \
            "O={output} " + \
@@ -636,7 +639,7 @@ rule vc_alignment_metrics:
     input: "variants_{assembly}/{sample}.merged.bam"
     output: "variants_{assembly}/{sample}.stats.txt"
     conda: "envs/variant_calling.yaml"
-    shell: "picard " + \
+    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
            "CollectAlignmentSummaryMetrics " + \
            "I={input} " + \
            "O={output}"
@@ -646,7 +649,7 @@ rule vc_replace_read_groups:
     input: "variants_{assembly}/{sample}.merged.bam"
     output: "variants_{assembly}/{sample}.merged.rg.bam"
     conda: "envs/variant_calling.yaml"
-    shell: "picard " + \
+    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
            "AddOrReplaceReadGroups " + \
            "I={input} " + \
            "O={output} " + \
@@ -664,7 +667,7 @@ rule vc_seq_dict:
     input: "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa"
     output: "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.dict"
     conda: "envs/variant_calling.yaml"
-    shell: "picard " + \
+    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
            "CreateSequenceDictionary " + \
            "R={input} " + \
            "O={output}"
@@ -675,7 +678,7 @@ rule vc_realign:
            "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.dict"
     output: "variants_{assembly}/{sample}.merged.rg.ordered.bam"
     conda: "envs/variant_calling.yaml"
-    shell: "picard " + \
+    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
            "ReorderSam " + \
            "I={input[0]} " + \
            "O={output} " + \
@@ -697,7 +700,7 @@ rule vc_realigner_target_creator:
            "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.fai"
     output: "variants_{assembly}/{sample}.merged.rg.ordered.bam.intervals"
     conda: "envs/variant_calling.yaml"
-    shell: "gatk " + \
+    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
            "-T RealignerTargetCreator " + \
            "-R {input[1]} " + \
            "-I {input[0]} " + \
@@ -711,7 +714,7 @@ rule vc_indel_realigner:
            "variants_{assembly}/{sample}.merged.rg.ordered.bam.intervals"
     output: "variants_{assembly}/{sample}.indels.bam"
     conda: "envs/variant_calling.yaml"
-    shell: "gatk " + \
+    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
            "-T IndelRealigner " + \
            "-R \"{input[1]}\" " + \
            "-I {input[0]} " + \
@@ -726,7 +729,7 @@ rule vc_base_recalibrator:
            "dbsnp_{assembly}/All_20180418.vcf.gz.tbi"
     output: "variants_{assembly}/{sample}.indels.recal.csv"
     conda: "envs/variant_calling.yaml"
-    shell: "gatk " + \
+    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
            "-T BaseRecalibrator " + \
            "-R {input[1]} " + \
            "-I {input[0]} " + \
@@ -745,7 +748,7 @@ rule vc_print_reads:
            "variants_{assembly}/{sample}.indels.recal.csv"
     output: "variants_{assembly}/{sample}.final.bam"
     conda: "envs/variant_calling.yaml"
-    shell: "gatk " + \
+    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
            "-T PrintReads " + \
            "-R {input[1]} " + \
            "-I {input[0]} " + \
@@ -755,19 +758,23 @@ rule vc_print_reads:
 
 ### 14. variant calling with GATK-HC
 # use GATK Haplotypecaller with runtime-optimized settings
+# -variant_index_type LINEAR -variant_index_parameter 128000 IW added because
+# the GATK program told me so and otherwise would exit with error.
 # java -XX:+UseConcMarkSweepGC -XX:ParallelGCThreads=4 -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar gatk 
 rule vc_snp_calling_with_gatk_hc:
     input: "variants_{assembly}/{sample}.final.bam",
            "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
     output: "variants_{assembly}/{sample}.vcf"
     conda: "envs/variant_calling.yaml"
-    shell: "gatk " + \
+    shell: "java -XX:+UseConcMarkSweepGC -XX:ParallelGCThreads=4 -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
            "-T HaplotypeCaller " + \
            "-R {input[1]} " + \
            "-I {input[0]} " + \
            "--genotyping_mode DISCOVERY " + \
            "-o {output} " + \
            "-ERC GVCF " + \
+           "-variant_index_type LINEAR " + \
+           "-variant_index_parameter 128000 " + \
            "-nct 8"
 
 # Doing the variant calling for all 9 samples
