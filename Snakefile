@@ -8,6 +8,10 @@ from Bio import SeqIO
 import os
 
 
+################################################################################
+############### Writing some general statistics to file ########################
+################################################################################
+
 # Chromosome and scaffold names for later use
 CHR_GRCh38 = ["chromosome."+str(x) for x in range(1,23)] \
            + ["chromosome."+str(x) for x in ["MT","X","Y"]]
@@ -59,6 +63,11 @@ rule extract_lineage:
     output: "busco_lineage/mammalia_odb9/lengths_cutoff",
             "busco_lineage/mammalia_odb9/scores_cutoff"
     shell: "tar --directory busco_lineage -xvzf {input}"
+
+
+################################################################################
+############### Finding mammalian core genes as QC using busco #################
+################################################################################
                     
 # Running Busco on a genome file
 # --force: Deleting results folder; start new run
@@ -126,6 +135,11 @@ rule summary_busco_grch38:
     output: "busco_GRCh38/busco_summary.txt"
     script: "scripts/busco_summary.py"
 
+
+################################################################################
+###################### Getting reference sequences #############################
+################################################################################
+
 # Downloading all GRCh38 sequence data available from Ensembl (release 93,
 # but note, that on sequence level, the release shouldn't make a difference)
 rule download_GRCh38:
@@ -166,6 +180,11 @@ rule cp_and_rename_assembly:
     input: "data/pilon.fasta"
     output: "seq_EGYPTREF/Homo_sapiens.EGYPTREF.dna.primary_assembly.fa"
     shell: "cp {input} {output}"
+
+
+################################################################################
+######################### Repeat masking with repeatmasker #####################
+################################################################################
 
 # Running repeatmasker on the Egyptian genome assembly
 # I use a separate environment for repeatmasker, because, as of now, it cannot 
@@ -254,7 +273,12 @@ rule write_scaffold_fastas:
                 with open(output[i], "w") as f_out:
                     SeqIO.write(record, f_out, "fasta")
                     i += 1
-            
+
+
+################################################################################
+########### Reference to assembly genome alignment with lastz ##################
+################################################################################
+
 # Computing genome alignments using lastz
 # [unmask] Attaching this to the chromosome filename instructs lastz to ignore 
 # masking information and treat repeats the same as any other part of the 
@@ -329,6 +353,48 @@ rule align_all_vs_all:
     input: expand("align_lastz_GRCh38_vs_EGYPTREF/{chr}_vs_{scaffold}.maf", \
                   chr=CHR_GRCh38, scaffold=EGYPT_SCAFFOLDS)
 
+# Computing the GRCh38 recovery rate using the mafTools package 
+# (as in Cho et al.). Using mafTools program mafPairCoverage, it is necessary
+# to first combine all scaffold maf files for a chromosome, and then run 
+# mafTransitiveClosure
+rule combine_maf_files_for_recovery:
+    input: expand("align_lastz_GRCh38_vs_EGYPTREF/{{chr}}_vs_{scaffold}.maf", \
+                   scaffold=EGYPT_SCAFFOLDS)
+    output: "align_lastz_GRCh38_vs_EGYPTREF/recovery/{chr}_alignments.maf"
+    run: 
+        shell("cat {input[0]} > {output}")
+        for filename in input[1:]:
+            # Append to large file; some file only have comments, no alignments
+            # therefore we need to add & true because other wise the exit code
+            # would indicate an error
+            shell("cat {filename} | grep -v '#' >> {output} & true")
+
+rule transitive_closure:
+    input: "align_lastz_GRCh38_vs_EGYPTREF/recovery/{chr}_alignments.maf"
+    output: "align_lastz_GRCh38_vs_EGYPTREF/recovery/{chr}.transclos"
+    params: chr_number=lambda wildcards: wildcards.chr.split(".")[1]
+    shell: "./ext_tools/mafTools/bin/mafTransitiveClosure " + \
+           "--maf {input} > {output}"
+
+rule maftools_coverage:
+    input: "align_lastz_GRCh38_vs_EGYPTREF/recovery/{chr}.transclos"
+    output: "align_lastz_GRCh38_vs_EGYPTREF/recovery/{chr}.coverage"
+    params: chr_number=lambda wildcards: wildcards.chr.split(".")[1]
+    shell: "./ext_tools/mafTools/bin/mafPairCoverage " + \
+           "--maf {input} --seq1 {params.chr_number} --seq2 \* > {output}"
+
+rule recovery:
+    input: expand("align_lastz_GRCh38_vs_EGYPTREF/recovery/{chr}.coverage", \
+                   chr=CHR_GRCh38)
+    output: "align_lastz_GRCh38_vs_EGYPTREF/recovery/recovery.txt"
+    run:
+        pass
+
+
+################################################################################
+########### Reference to assembly genome alignment with mummer #################
+################################################################################
+
 # Genome alignments using mummer4
 rule align_with_mummer:
     input: "repeatmasked_GRCh38/Homo_sapiens.GRCh38.dna.{chr}.fa.masked",
@@ -362,22 +428,6 @@ rule all_vs_all_dotplots_mummer:
     input: expand("align_mummer_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.gp", \
                   chr=CHR_GRCh38, scaffold=EGYPT_SCAFFOLDS)
 
-# Plotting for one scaffold the dotplot versus all chromosomes
-#rule mummer_dotplots_scaffold_vs_chromosomes:
-#    input: expand("align_mummer_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{{scaffold}}.ps", \
-#                  chr=CHR_GRCh38)
-#    output: "align_mummer_GRCh38_vs_EGYPTREF/dotplots/{scaffold}.ps",
-#            "align_mummer_GRCh38_vs_EGYPTREF/dotplots/{scaffold}.pdf"
-#    run: 
-        # Putting 5 plots together horizontal; needs to be done 5 times
-#        for h in range(5):
-#            files_horizontal_merge = " ".join(input[h*5:h*2*h*5])
-#            shell("convert "+files_horizontal_merge+" +append "+output[0]+str(h))
-        # Putting the 5 horizontal plots together vertically
-#        files_vertical_merge = " ".join([output[0]+str(h) for h in range(5)])
-#        shell("convert "+files_vertical_merge+" -append "+output[0])
-#        shell("convert {output[0]} {output[1]}")
-
 # Plotting the dotplots for all scaffolds
 rule mummer_dotplots_scaffold_vs_chromosomes_all:
     input: expand("align_lastz_GRCh38_vs_EGYPTREF/dotplots/{scaffold}.pdf", \
@@ -396,42 +446,30 @@ rule delta_filter_mummer:
     conda: "envs/mummer.yaml"
     shell: "delta-filter -l 10000 -u 0 -q {input} > {output}"
 
-# Computing the GRCh38 recovery rate using the mafTools package 
-# (as in Cho et al.). Using mafTools program mafPairCoverage, it is necessary
-# to first combine all chromosome/scaffold maf files, and then run 
-# mafTransitiveClosure
-rule combine_maf_files_for_recovery:
-    input: expand("align_lastz_GRCh38_vs_EGYPTREF/{chr}_vs_{scaffold}.maf", \
-                  chr=CHR_GRCh38, scaffold=EGYPT_SCAFFOLDS)
-    output: "align_lastz_GRCh38_vs_EGYPTREF/recovery/all_alignments.maf"
-    run: 
-        shell("cat {input[0]} > {output}")
-        for filename in input[1:]:
-            # Append to large file; some file only have comments, no alignments
-            # therefore we need to add & true because other wise the exit code
-            # would indicate an error
-            shell("cat {filename} | grep -v '#' >> {output} & true")
-
-rule transitive_closure:
-    input: "align_lastz_GRCh38_vs_EGYPTREF/recovery/all_alignments.maf"
-    output: "align_lastz_GRCh38_vs_EGYPTREF/recovery/all_transclos.maf"
-    shell: "./ext_tools/mafTools/bin/mafPairCoverage " + \
-           "--maf --seq1 1 --seq2 * {input} > {output}"
-
-rule maftools_coverage:
-    input: "align_lastz_GRCh38_vs_EGYPTREF/recovery/all_transclos.maf"
-    output: "align_lastz_GRCh38_vs_EGYPTREF/recovery/all.coverage"
-    shell: "./ext_tools/mafTools/bin/mafPairCoverage " + \
-           "--maf {input} > {output}"
-
-rule recovery:
-    input: "align_lastz_GRCh38_vs_EGYPTREF/recovery/all.coverage"
-    output: "align_lastz_GRCh38_vs_EGYPTREF/recovery/recovery.txt"
-    run:
-        pass
+# Running the tool nucdiff to compare two assemblies based on alignment with 
+# mummer, which is also performed by the nucdiff tool
+rule run_nucdiff:
+    input: ref="seq_{a1}/Homo_sapiens.{a1}.dna.primary_assembly.fa", \
+           query="seq_{a2}/Homo_sapiens.{a2}.dna.primary_assembly.fa"
+    output: "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_snps.gff", \
+            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_struct.gff" \
+            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_blocks.gff", \
+            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_snps.vcf", \
+            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_query_snps.gff", \
+            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_query_struct.gff", \
+            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_query_blocks.gff", \
+            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_query_snps.vcf", \
+            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_stat.out"
+    conda: "envs/nucdiff.yaml"
+    shell: "nucdiff --help"
+#    shell: "python nucdiff.py {input.ref} {input.query} {params.outdir} " + \
+#           "{wildcards.assembly1}_vs_{wildcards.assembly2} " + \
+#           "--proc 8"
 
 
-# Processing Illumina PE data
+################################################################################
+######## Processing Illumina PE data for the assembled individual ##############
+################################################################################
 
 # The Illumina library sample names
 ILLUMINA_SAMPLES = ["NDES00177","NDES00178","NDES00179","NDES00180","NDES00181"]
@@ -500,6 +538,7 @@ rule run_fastqc_all:
     input: expand("illumina_qc/fastqc/{lib}_{read}_fastqc.html", lib=ILLUMINA_LIBS, \
                                                           read=["1","2"])
 
+
 ################################################################################
 ################### SNP Calling for 9 Egyptian individuals #####################
 ################################################################################
@@ -556,7 +595,7 @@ rule vc_bwa_mem:
     output: "variants_{assembly}/{sample}_{infolane}.sam"
     wildcard_constraints: sample="[A-Z,0-9]+", infolane="[A-Z,0-9,_]+"
     conda: "envs/variant_calling.yaml"
-    shell: "bwa mem -t 8 " + \
+    shell: "bwa mem -t 24 " + \
            "bwa_index/Homo_sapiens.{wildcards.assembly}.dna.primary_assembly " + \
            "{input.fastq_r1} {input.fastq_r2} > {output}"
 
@@ -568,7 +607,7 @@ rule vc_clean_sam:
     input: "variants_{assembly}/{sample}_{infolane}.sam"
     output: "variants_{assembly}/{sample}_{infolane}.cleaned.sam"
     conda: "envs/variant_calling.yaml"
-    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \ 
+    shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \ 
            "CleanSam " + \
            "I={input} " + \
            "O={output}"
@@ -579,7 +618,7 @@ rule vc_sort_and_index_sam:
     input: "variants_{assembly}/{sample}_{infolane}.cleaned.sam"
     output: "variants_{assembly}/{sample}_{infolane}.cleaned.bam"
     conda: "envs/variant_calling.yaml"
-    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
+    shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
            "SortSam " + \
            "I={input} " + 
            "O={output} " + \
@@ -592,7 +631,7 @@ rule vc_fix_mates:
     input: "variants_{assembly}/{sample}_{infolane}.cleaned.bam"
     output: "variants_{assembly}/{sample}_{infolane}.fixed.bam"
     conda: "envs/variant_calling.yaml"
-    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
+    shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
            "FixMateInformation " + \
            "I={input} " + \
            "O={output} " + \
@@ -605,7 +644,7 @@ rule vc_mark_duplicates:
     output: "variants_{assembly}/{sample}_{infolane}.rmdup.bam",
             "variants_{assembly}/{sample}_{infolane}.rmdup.txt"
     conda: "envs/variant_calling.yaml"
-    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
+    shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
            "MarkDuplicates " + \
            "I={input} " + \
            "O={output[0]} " + \
@@ -626,20 +665,20 @@ rule vc_merge_bams_per_sample:
     params:
         picard_in=lambda wildcards, input: "I="+" I=".join(input)
     conda: "envs/variant_calling.yaml"
-    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
+    shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
            "MergeSamFiles " + \
            "{params.picard_in} " + \
            "O={output} " + \
            "SORT_ORDER=coordinate " + \
            "CREATE_INDEX=true " + \
-           "USE_THREADING=8"
+           "USE_THREADING=24"
 
 ### 7. Collect Alignment Summary Metrics
 rule vc_alignment_metrics:
     input: "variants_{assembly}/{sample}.merged.bam"
     output: "variants_{assembly}/{sample}.stats.txt"
     conda: "envs/variant_calling.yaml"
-    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
+    shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
            "CollectAlignmentSummaryMetrics " + \
            "I={input} " + \
            "O={output}"
@@ -649,7 +688,7 @@ rule vc_replace_read_groups:
     input: "variants_{assembly}/{sample}.merged.bam"
     output: "variants_{assembly}/{sample}.merged.rg.bam"
     conda: "envs/variant_calling.yaml"
-    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
+    shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
            "AddOrReplaceReadGroups " + \
            "I={input} " + \
            "O={output} " + \
@@ -667,7 +706,7 @@ rule vc_seq_dict:
     input: "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa"
     output: "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.dict"
     conda: "envs/variant_calling.yaml"
-    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
+    shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
            "CreateSequenceDictionary " + \
            "R={input} " + \
            "O={output}"
@@ -678,7 +717,7 @@ rule vc_realign:
            "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.dict"
     output: "variants_{assembly}/{sample}.merged.rg.ordered.bam"
     conda: "envs/variant_calling.yaml"
-    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
+    shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
            "ReorderSam " + \
            "I={input[0]} " + \
            "O={output} " + \
@@ -700,12 +739,12 @@ rule vc_realigner_target_creator:
            "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.fai"
     output: "variants_{assembly}/{sample}.merged.rg.ordered.bam.intervals"
     conda: "envs/variant_calling.yaml"
-    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
+    shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
            "-T RealignerTargetCreator " + \
            "-R {input[1]} " + \
            "-I {input[0]} " + \
            "-o {output} " + \
-           "-nt 8"
+           "-nt 24"
 
 ### 11. IndelRealigner
 rule vc_indel_realigner:
@@ -714,7 +753,7 @@ rule vc_indel_realigner:
            "variants_{assembly}/{sample}.merged.rg.ordered.bam.intervals"
     output: "variants_{assembly}/{sample}.indels.bam"
     conda: "envs/variant_calling.yaml"
-    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
+    shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
            "-T IndelRealigner " + \
            "-R \"{input[1]}\" " + \
            "-I {input[0]} " + \
@@ -729,7 +768,7 @@ rule vc_base_recalibrator:
            "dbsnp_{assembly}/All_20180418.vcf.gz.tbi"
     output: "variants_{assembly}/{sample}.indels.recal.csv"
     conda: "envs/variant_calling.yaml"
-    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
+    shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
            "-T BaseRecalibrator " + \
            "-R {input[1]} " + \
            "-I {input[0]} " + \
@@ -739,7 +778,7 @@ rule vc_base_recalibrator:
            "-cov ContextCovariate " + \
            "-o {output} " + \
            "-knownSites {input[2]} " + \
-           "-nct 8"
+           "-nct 24"
 
 ### 13. Print Reads
 rule vc_print_reads:
@@ -748,13 +787,13 @@ rule vc_print_reads:
            "variants_{assembly}/{sample}.indels.recal.csv"
     output: "variants_{assembly}/{sample}.final.bam"
     conda: "envs/variant_calling.yaml"
-    shell: "java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
+    shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
            "-T PrintReads " + \
            "-R {input[1]} " + \
            "-I {input[0]} " + \
            "-o {output[0]} " + \
            "-BQSR {input[2]} " + \
-           "-nct 8"
+           "-nct 24"
 
 ### 14. variant calling with GATK-HC
 # use GATK Haplotypecaller with runtime-optimized settings
@@ -766,7 +805,7 @@ rule vc_snp_calling_with_gatk_hc:
            "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
     output: "variants_{assembly}/{sample}.vcf"
     conda: "envs/variant_calling.yaml"
-    shell: "java -XX:+UseConcMarkSweepGC -XX:ParallelGCThreads=4 -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
+    shell: "java -XX:+UseConcMarkSweepGC -XX:ParallelGCThreads=4 -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
            "-T HaplotypeCaller " + \
            "-R {input[1]} " + \
            "-I {input[0]} " + \
@@ -775,14 +814,113 @@ rule vc_snp_calling_with_gatk_hc:
            "-ERC GVCF " + \
            "-variant_index_type LINEAR " + \
            "-variant_index_parameter 128000 " + \
-           "-nct 8"
+           "-nct 24"
 
 # Doing the variant calling for all 9 samples
 rule vc_snp_calling_with_gatk_hc_all:
     input: expand("variants_GRCh38/{sample}.vcf", sample=EGYPT_SAMPLES)
 
-################################################################################
-################### Assembly assessment and correction #########################
-################################################################################
+# Extracting variants within a certain genes (and near to it)
+
+# Therefore, obtain a recent Ensemble annotation file first
+rule get_ensembl_gene_annotation_gtf:
+    output: temp("annotations/Homo_sapiens.GRCh38.94.gtf.gz")
+    shell: "wget -P annotations " + \
+           "ftp://ftp.ensembl.org/pub/release-94/gtf/homo_sapiens/Homo_sapiens.GRCh38.94.gtf.gz "
+
+rule unzip_ensembl_gene_annotation_gtf:
+    input: "annotations/Homo_sapiens.GRCh38.94.gtf.gz"
+    output: "annotations/Homo_sapiens.GRCh38.94.gtf"
+    shell: "gzip -d {input}"
 
 
+################################################################################
+##### Assembly assessment and correction (Things related to PacBio data) #######
+################################################################################
+
+# There are 5 PacBio libraries from the same individual, each sequences in 
+# various sequencing runs  
+PACBIO_SAMPLES = ["r54171","r54172","r54212","r54214","r54217"]
+
+# The naming convention for folders is the sample name, _, then the seqrun ID, 
+# The naming convention for files is the same, but for some reason the "r" of
+# the samples has been replaced by "m"; also sum files are in subdirectories
+# Since there seems no apparent system to the file naming, I here just map the
+# samples to the corresponding Pacbio filenames (without ending, but the file
+# basename is always the same)
+PACBIO_SAMPLES_TO_SEQRUN_PATH = { \
+    "r54171": ["r54171_180507_074037/m54171_180507_074037", \
+               "r54171_180508_081816/m54171_180508_081816", \
+               "r54171_180509_085337/m54171_180509_085337", \
+               "r54171_180509_190202/m54171_180509_190202", \
+               "r54171_180510_051157/m54171_180510_051157", \
+               "r54171_180511_073925/m54171_180511_073925", \
+               "r54171_180511_174954/m54171_180511_174954", \
+               "r54171_180512_040316/m54171_180512_040316", \
+               "r54171_180512_141733/m54171_180512_141733", \
+               "r54171_180513_003153/m54171_180513_003153", \
+               "r54171_180514_191117/m54171_180514_191117", \
+               "r54171_180515_052445/m54171_180515_052445", \
+               "r54171_180515_153940/m54171_180515_153940"],\
+    "r54172": ["r54172_20180226_063627/1_A08/m54172_180226_064443", \
+               "r54172_20180227_060945/1_A08/m54172_180227_061743", \
+               "r54172_20180227_060945/2_B08/m54172_180227_162339", \
+               "r54172_20180227_060945/3_C08/m54172_180228_023312", \
+               "r54172_20180301_065149/2_B08/m54172_180301_170719"], \
+    "r54212": ["r54212_20180207_084734/1_A05/m54212_180207_085743"], \
+    "r54214": ["r54214_20180225_094705/1_A08/m54214_180225_095639", \
+               "r54214_20180226_063218/1_A08/m54214_180226_064236", \
+               "r54214_20180226_063218/2_B08/m54214_180226_164754", \
+               "r54214_20180227_074241/1_A08/m54214_180227_075436", \
+               "r54214_20180227_074241/2_B08/m54214_180227_180004", \
+               "r54214_20180228_083736/1_A05/m54214_180228_084706", \
+               "r54214_20180301_092943/1_A08/m54214_180301_094052", \
+               "r54214_20180301_092943/2_B08/m54214_180301_194631", \
+               "r54214_20180301_092943/3_C08/m54214_180302_055606", \
+               "r54214_20180303_091311/1_A08/m54214_180303_092301", \
+               "r54214_20180304_073054/1_A05/m54214_180304_074025", \
+               "r54214_20180304_073054/2_B05/m54214_180304_174558", \
+               "r54214_20180304_073054/3_C05/m54214_180305_035534", \
+               "r54214_20180304_073054/4_D05/m54214_180305_140511", \
+               "r54214_20180304_073054/5_E05/m54214_180306_001437", \
+               "r54214_20180304_073054/6_F05/m54214_180306_102433", \
+               "r54214_20180304_073054/7_G05/m54214_180306_203421", \
+               "r54214_20180304_073054/8_H05/m54214_180307_064357", \
+               "r54214_20180308_072240/1_A01/m54214_180308_073253", \
+               "r54214_20180308_072240/2_B01/m54214_180308_173821", \
+               "r54214_20180309_085608/1_A01/m54214_180309_090535", \
+               "r54214_20180309_085608/2_B01/m54214_180309_191107", \
+               "r54214_20180309_085608/3_C01/m54214_180310_052041", \
+               "r54214_20180309_085608/4_D01/m54214_180310_153039", \
+               "r54214_20180309_085608/5_E01/m54214_180311_014012", \
+               "r54214_20180309_085608/6_F01/m54214_180311_114949", \
+               "r54214_20180312_065341/1_A08/m54214_180312_071349", \
+               "r54214_20180313_083026/1_A08/m54214_180313_083936", \
+               "r54214_20180314_082924/1_A05/m54214_180314_083852"], \
+    "r54217": ["r54217_20180205_093834/1_A01/m54217_180205_095019"]
+}
+
+rule symlink_pacbio:
+    output: directory("data/01.pacbio")
+    shell: "ln -s /data/lied_egypt_genome/raw/P101HW18010820-01_human_2018.08.29/00.data/01.pacbio {output}"
+
+rule count_pacbio_reads:
+    input: expand("data/01.pacbio/{pb_files}.subreads.bam", \
+           pb_files = [item for subl in PACBIO_SAMPLES_TO_SEQRUN_PATH.values() \
+                       for item in subl])
+    output: "pacbio/num_reads.txt"
+    run:
+        shell("touch {output}")
+        for filename in input[1:]:
+            shell("samtools view {filename} | wc -l >> {output}.tmp")
+        sum = 0
+        with open("{output}.tmp","r") as f_in, open("{output}","r") as f_out:
+            for line in f_in:
+                s = line.strip().split(" ")
+                num = s[0]
+                sum += num
+                filename = s[1].split("/")[-1]
+                f_out.write(filename+"\t"+num+"\n")
+            f_out.write("Sum"+ "\t"+sum+"\n")
+                
+    

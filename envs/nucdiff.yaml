@@ -1,0 +1,4 @@
+channels:
+  - bioconda
+dependencies:
+  - nucdiff == 2.0.2
