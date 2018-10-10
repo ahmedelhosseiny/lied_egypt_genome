@@ -452,7 +452,7 @@ rule run_nucdiff:
     input: ref="seq_{a1}/Homo_sapiens.{a1}.dna.primary_assembly.fa", \
            query="seq_{a2}/Homo_sapiens.{a2}.dna.primary_assembly.fa"
     output: "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_snps.gff", \
-            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_struct.gff" \
+            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_struct.gff", \
             "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_blocks.gff", \
             "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_snps.vcf", \
             "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_query_snps.gff", \
@@ -460,11 +460,11 @@ rule run_nucdiff:
             "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_query_blocks.gff", \
             "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_query_snps.vcf", \
             "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_stat.out"
+    params: outdir=lambda wildcards: "nucdiff_"+wildcards.a1+"_vs_"+wildcards.a2
     conda: "envs/nucdiff.yaml"
-    shell: "nucdiff --help"
-#    shell: "python nucdiff.py {input.ref} {input.query} {params.outdir} " + \
-#           "{wildcards.assembly1}_vs_{wildcards.assembly2} " + \
-#           "--proc 8"
+    shell: "nucdiff {input.ref} {input.query} {params.outdir} " + \
+           "{wildcards.a1}_vs_{wildcards.a2} " + \
+           "--proc 24"
 
 
 ################################################################################
