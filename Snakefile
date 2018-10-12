@@ -423,6 +423,26 @@ rule align_all_vs_all_mummer:
     input: expand("align_mummer_GRCh38_vs_EGYPTREF/{chr}_vs_{scaffold}.delta", \
                   chr=CHR_GRCh38, scaffold=EGYPT_SCAFFOLDS)
 
+# Comparing the entire GRCh38 assembly with the entire EGYPTREF assembly
+# --mum:         Use anchor matches that are unique in both the reference and 
+#                query (false)
+# --threads=NUM: Use NUM threads (# of cores)
+# Path to conda environment:
+# /data/lied_egypt_genome/lied_egypt_genome/.snakemake/conda/5fab0d7a
+rule align_assemblies_with_mummer:
+    input: ref="seq_{a1}/Homo_sapiens.{a1}.dna.primary_assembly.fa",
+           query="seq_{a2}/Homo_sapiens.{a2}.dna.primary_assembly.fa"
+    output: "align_mummer_{a1}_vs_{a2}/assemblies/{a1}_vs_{a2}.delta"
+    conda: "envs/mummer.yaml"
+    shell: "nucmer " + \
+           "--mum " + \
+           "--threads=24 "
+           "-p align_mummer_{wildcards.a1}_vs_{wildcards.a2}/assemblies/{wildcards.a1}_vs_{wildcards.a2} " + \
+           "{input[0]} {input[1]}"
+
+rule align_assemblies_with_mummer_all:
+    input: "align_mummer_GRCh38_vs_EGYPTREF/assemblies/GRCh38_vs_EGYPTREF.delta"
+
 # All versus all dotplots of reference and Egyptian genome
 rule all_vs_all_dotplots_mummer:
     input: expand("align_mummer_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.gp", \
@@ -440,6 +460,10 @@ rule mummer_dotplots_scaffold_vs_chromosomes_all:
 # -u: float; Set the minimum alignment uniqueness, i.e. percent of the alignment 
 #     matching to unique reference AND query sequence [0, 100], default 0
 # -l: int; Set the minimum alignment length, default 0
+# -i: float; Set the minimum alignment identity [0, 100], default 0
+# -1: 1-to-1 alignment allowing for rearrangements
+# -r: Maps each position of each reference to its best hit in the query, 
+#     allowing for query overlaps (intersection of -r and -q alignments)
 rule delta_filter_mummer:
     input: "align_mummer_GRCh38_vs_EGYPTREF/{chr}_vs_{scaffold}.delta"
     output: "align_mummer_GRCh38_vs_EGYPTREF/{chr}_vs_{scaffold}.filter"
@@ -449,23 +473,28 @@ rule delta_filter_mummer:
 # Running the tool nucdiff to compare two assemblies based on alignment with 
 # mummer, which is also performed by the nucdiff tool
 rule run_nucdiff:
-    input: ref="seq_{a1}/Homo_sapiens.{a1}.dna.primary_assembly.fa", \
+    input: ref="seq_{a1}/Homo_sapiens.{a1}.dna.{chr}.fa", \
            query="seq_{a2}/Homo_sapiens.{a2}.dna.primary_assembly.fa"
-    output: "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_snps.gff", \
-            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_struct.gff", \
-            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_blocks.gff", \
-            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_snps.vcf", \
-            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_query_snps.gff", \
-            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_query_struct.gff", \
-            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_query_blocks.gff", \
-            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_query_snps.vcf", \
-            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_stat.out"
+    output: "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_{chr}_ref_snps.gff", \
+            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_{chr}_ref_struct.gff", \
+            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_{chr}_ref_blocks.gff", \
+            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_{chr}_ref_snps.vcf", \
+            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_{chr}_query_snps.gff", \
+            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_{chr}_query_struct.gff", \
+            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_{chr}_query_blocks.gff", \
+            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_{chr}_query_snps.vcf", \
+            "nucdiff_{a1}_vs_{a2}/results/{a1}_vs_{a2}_{chr}_stat.out"
     params: outdir=lambda wildcards: "nucdiff_"+wildcards.a1+"_vs_"+wildcards.a2
     conda: "envs/nucdiff.yaml"
     shell: "nucdiff {input.ref} {input.query} {params.outdir} " + \
-           "{wildcards.a1}_vs_{wildcards.a2} " + \
+           "{wildcards.a1}_vs_{wildcards.a2}_{wildcards.chr} " + \
+           "--vcf yes " + \
+           "--filter_opt '-l 1000 -i 99' "
            "--proc 24"
 
+rule run_nucdiff_all:
+    input: expand("nucdiff_GRCh38_vs_EGYPTREF/results/GRCh38_vs_EGYPTREF_{chr}_stat.out", \
+                  chr=CHR_GRCh38)
 
 ################################################################################
 ######## Processing Illumina PE data for the assembled individual ##############
@@ -521,10 +550,10 @@ rule bwa_mem_all:
     input: expand("map_bwa_{assembly}/{lib}.bam", \
                   assembly=["EGYPTREF","GRCh38"], lib=ILLUMINA_LIBS)
 
-# For SNP calling and other things that are done for the Illumnin PE data
+# For SNP calling and other things that are done for the Illumnina PE data
 rule symlink_illumina_wgs_dir:
     output: directory("data/02.DES")
-    shell: "ln -s /data/lied_egypt_genome/raw/02.DES {output}"
+    shell: "ln -s /data/lied_egypt_genome/raw/P101HW18010820-01_human_2018.08.29/00.data/02.DES {output}"
 
 # Some QC: Here, fastqc for all Illumina PE WGS files
 rule run_fastqc:
@@ -540,30 +569,46 @@ rule run_fastqc_all:
 
 
 ################################################################################
-################### SNP Calling for 9 Egyptian individuals #####################
-################################################################################
+################### SNP Calling for 10 Egyptian individuals ####################
+#################### (one the reference genome individual) #####################
 
-# If possible, the variant calling (vc) tasks are performed with 8 threads and
-# with 35Gb of memory, such that 5 tasks can be run on a node in parallel
+# If possible, the variant calling (vc) tasks are performed with 24 threads and
+# with 80Gb of memory, such that 2 tasks can be run on a node in parallel;
+# The reason is that the 80Gb of memory are needed and thus only two tasks per
+# node can be run anyway.
 
 # These are the sample IDs
-EGYPT_SAMPLES = ["LU18","LU19","LU2","LU22","LU23","LU9","PD114","PD115","PD82","TEST"]
+# The EGYPTREF Illumina sequencing data is actually not in the same folder, but
+# in order to do the SNP calling with this sample the same way as with the 
+# other 9 samples, I made a folder EGYPTREF there in which I generated symlinks
+# which link to the fastq files within the 02.DES folder of the data from 
+# EGYPTREF and I symlinked the individual fastq files and used a naming 
+# convention that follows the same pattern than that for the 9 Egyptian samples
+EGYPT_SAMPLES = ["EGYPTREF","LU18","LU19","LU2","LU22","LU23","LU9","PD114", \
+                 "PD115","PD82","TEST"]
 
 # These are additional IDs after the sample IDs, given by Novogene, e.g 
 # H75TCDMXX is the ID of the sequencer, L1 is the first lane
 EGYPT_SAMPLES_TO_PREPLANES = {
-    "LU18":  ["NDHG02363_H75HVDMXX_L1", "NDHG02363_H75TCDMXX_L1", \
-              "NDHG02363_H75HVDMXX_L2", "NDHG02363_H75TCDMXX_L2", \
-              "NDHG02363_H75FVDMXX_L1", "NDHG02363_H75FVDMXX_L2"],
-    "LU19":  ["NDHG02358_H7777DMXX_L1", "NDHG02358_H7777DMXX_L2"],
-    "LU2":   ["NDHG02365_H75FVDMXX_L1", "NDHG02365_H75FVDMXX_L1"],
-    "LU22":  ["NDHG02364_H75LLDMXX_L1", "NDHG02364_H75LLDMXX_L2"],
-    "LU23":  ["NDHG02366_H75FVDMXX_L1", "NDHG02366_H75FVDMXX_L2"],
-    "LU9":   ["NDHG02362_H772LDMXX_L1", "NDHG02362_H772LDMXX_L2"],
-    "PD114": ["NDHG02360_H772LDMXX_L1", "NDHG02360_H772LDMXX_L2"],
-    "PD115": ["NDHG02361_H772LDMXX_L1", "NDHG02361_H772LDMXX_L2"],
-    "PD82":  ["NDHG02359_H772LDMXX_L1", "NDHG02359_H772LDMXX_L2"],
-    "TEST":  ["PROTOCOL_SEQUENCER_L1", "PROTOCOL_SEQUENCER_L2"] # the last is for testing purposes
+    "EGYPTREF": ["NDES00177_L4","NDES00177_L5","NDES00177_L6","NDES00177_L7", \
+                 "NDES00178_L1","NDES00178_L4","NDES00178_L5","NDES00178_L6", \
+                 "NDES00178_L7", \
+                 "NDES00179_L4","NDES00179_L5","NDES00179_L6","NDES00179_L7", \
+                 "NDES00180_L1","NDES00180_L4","NDES00180_L5","NDES00180_L6", \
+                 "NDES00180_L7", \
+                 "NDES00181_L4", "NDES00181_L5","NDES00181_L6", "NDES00181_L7"],
+    "LU18":     ["NDHG02363_H75HVDMXX_L1", "NDHG02363_H75TCDMXX_L1", \
+                 "NDHG02363_H75HVDMXX_L2", "NDHG02363_H75TCDMXX_L2", \
+                 "NDHG02363_H75FVDMXX_L1", "NDHG02363_H75FVDMXX_L2"],
+    "LU19":     ["NDHG02358_H7777DMXX_L1", "NDHG02358_H7777DMXX_L2"],
+    "LU2":      ["NDHG02365_H75FVDMXX_L1", "NDHG02365_H75FVDMXX_L1"],
+    "LU22":     ["NDHG02364_H75LLDMXX_L1", "NDHG02364_H75LLDMXX_L2"],
+    "LU23":     ["NDHG02366_H75FVDMXX_L1", "NDHG02366_H75FVDMXX_L2"],
+    "LU9":      ["NDHG02362_H772LDMXX_L1", "NDHG02362_H772LDMXX_L2"],
+    "PD114":    ["NDHG02360_H772LDMXX_L1", "NDHG02360_H772LDMXX_L2"],
+    "PD115":    ["NDHG02361_H772LDMXX_L1", "NDHG02361_H772LDMXX_L2"],
+    "PD82":     ["NDHG02359_H772LDMXX_L1", "NDHG02359_H772LDMXX_L2"],
+    "TEST":     ["PROTOCOL_SEQUENCER_L1", "PROTOCOL_SEQUENCER_L2"] # the last is for testing purposes
 }
 
 # Symlinking the raw data directory
@@ -711,7 +756,7 @@ rule vc_seq_dict:
            "R={input} " + \
            "O={output}"
 
-rule vc_realign:
+rule vc_reorder:
     input: "variants_{assembly}/{sample}.merged.rg.bam",
            "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
            "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.dict"
@@ -724,7 +769,13 @@ rule vc_realign:
            "R={input[1]} " + \
            "CREATE_INDEX=true"
 
-### 10. RealignerTargetCreator
+### Formally, 10. RealignerTargetCreator and 11. IndelRealigner
+# Note: I do not perform this anymore, since according to the GATK website: 
+# "Note that indel realignment is no longer necessary for variant discovery if 
+# you plan to use a variant caller that performs a haplotype assembly step, such
+# as HaplotypeCaller or MuTect2. "
+
+### 12. Base Quality Recalibration
 
 # Therefore, the fasta file needs to be indexed
 rule vc_inex_fasta:
@@ -732,41 +783,12 @@ rule vc_inex_fasta:
     output: "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.fai"
     shell: "samtools faidx {input}"
 
-# java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar
-rule vc_realigner_target_creator:
-    input: "variants_{assembly}/{sample}.merged.rg.ordered.bam",
-           "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
-           "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.fai"
-    output: "variants_{assembly}/{sample}.merged.rg.ordered.bam.intervals"
-    conda: "envs/variant_calling.yaml"
-    shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
-           "-T RealignerTargetCreator " + \
-           "-R {input[1]} " + \
-           "-I {input[0]} " + \
-           "-o {output} " + \
-           "-nt 24"
-
-### 11. IndelRealigner
-rule vc_indel_realigner:
-    input: "variants_{assembly}/{sample}.merged.rg.ordered.bam",
-           "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
-           "variants_{assembly}/{sample}.merged.rg.ordered.bam.intervals"
-    output: "variants_{assembly}/{sample}.indels.bam"
-    conda: "envs/variant_calling.yaml"
-    shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
-           "-T IndelRealigner " + \
-           "-R \"{input[1]}\" " + \
-           "-I {input[0]} " + \
-           "-targetIntervals {input[2]} " + \
-           "-o {output}"
-
-### 12. Base Quality Recalibration
 rule vc_base_recalibrator:
-    input: "variants_{assembly}/{sample}.indels.bam",
+    input: "variants_{assembly}/{sample}.merged.rg.ordered.bam",
            "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
            "dbsnp_{assembly}/All_20180418.vcf.gz",
            "dbsnp_{assembly}/All_20180418.vcf.gz.tbi"
-    output: "variants_{assembly}/{sample}.indels.recal.csv"
+    output: "variants_{assembly}/{sample}.recal.csv"
     conda: "envs/variant_calling.yaml"
     shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
            "-T BaseRecalibrator " + \
@@ -782,9 +804,9 @@ rule vc_base_recalibrator:
 
 ### 13. Print Reads
 rule vc_print_reads:
-    input: "variants_{assembly}/{sample}.indels.bam",
+    input: "variants_{assembly}/{sample}.merged.rg.ordered.bam",
            "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
-           "variants_{assembly}/{sample}.indels.recal.csv"
+           "variants_{assembly}/{sample}.recal.csv"
     output: "variants_{assembly}/{sample}.final.bam"
     conda: "envs/variant_calling.yaml"
     shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
@@ -803,12 +825,15 @@ rule vc_print_reads:
 rule vc_snp_calling_with_gatk_hc:
     input: "variants_{assembly}/{sample}.final.bam",
            "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
+           "dbsnp_{assembly}/All_20180418.vcf.gz",
+           "dbsnp_{assembly}/All_20180418.vcf.gz.tbi"
     output: "variants_{assembly}/{sample}.vcf"
     conda: "envs/variant_calling.yaml"
     shell: "java -XX:+UseConcMarkSweepGC -XX:ParallelGCThreads=4 -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
            "-T HaplotypeCaller " + \
            "-R {input[1]} " + \
            "-I {input[0]} " + \
+           "--dbsnp {input[2]} "
            "--genotyping_mode DISCOVERY " + \
            "-o {output} " + \
            "-ERC GVCF " + \
@@ -816,9 +841,11 @@ rule vc_snp_calling_with_gatk_hc:
            "-variant_index_parameter 128000 " + \
            "-nct 24"
 
-# Doing the variant calling for all 9 samples
+# Doing the variant calling for all 10 samples
+# and collecting alignment summary stats
 rule vc_snp_calling_with_gatk_hc_all:
-    input: expand("variants_GRCh38/{sample}.vcf", sample=EGYPT_SAMPLES)
+    input: expand("variants_GRCh38/{sample}.vcf", sample=EGYPT_SAMPLES),
+           expand("variants_GRCh38/{sample}.stats.txt", sample=EGYPT_SAMPLES)
 
 # Extracting variants within a certain genes (and near to it)
 

@@ -14,7 +14,7 @@ fi
 source activate workflow_lied_egypt_genome
 
 echo "RUNNING SNAKEMAKE WORKFLOW..."
-snakemake --rerun-incomplete -k -j 10 --resources io=4 --use-conda --jobname "{jobid}.{rulename}.sh" --cluster "sbatch --mem 90G --partition=longterm --time 7-00:00:00 -c 24 -o log/%j.{rule}.log" --printshellcmds nucdiff_GRCh38_vs_EGYPTREF/results/GRCh38_vs_EGYPTREF_stat.out #vc_snp_calling_with_gatk_hc_all 
+snakemake -n --rerun-incomplete -k -j 12 --resources io=4 --use-conda --jobname "{jobid}.{rulename}.sh" --cluster "sbatch --mem 80G --partition=longterm --time 4-00:00:00 -c 24 -o log/%j.{rule}.log" --printshellcmds align_assemblies_with_mummer_all vc_snp_calling_with_gatk_hc_all 
 
 source deactivate
 conda list -n workflow_lied_egypt_genome --export > environment_versions.yaml
