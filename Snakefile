@@ -19,6 +19,8 @@ CHR_GRCh38 = ["chromosome."+str(x) for x in range(1,23)] \
 EGYPT_SCAFFOLDS = ["fragScaff_scaffold_"+str(x)+"_pilon" for x in range(0,41)] \
                 + ["original_scaffold_"+str(x)+"_pilon" for x in range(41,145)]
 
+CEGYPT_CONTIGS = ["Contig"+str(x) for x in range(0,360)]
+
 CHR_YORUBA = [x for x in CHR_GRCh38 if not x in ["chromosome.MT","chromosome.Y"]]
 
 YORUBA_SCAFFOLDS = []
@@ -37,6 +39,19 @@ if os.path.exists("seq_AK1/ak1_scaffold_to_genbank.txt"):
         for line in f_in:
             AK1_SCAFFOLDS.append(line.split("\t")[0])
 
+# For plotting etc. we sometimes want the longest SCAFFOLDS, since these are not
+# named according to size, here are the longest ones
+LONGEST_AK1_SCAFFOLDS = [
+    "Scaffold0147","Scaffold0001","Scaffold00019","Scaffold0008", \
+    "Scaffold0151","Scaffold0148","Scaffold00033","Scaffold0002", \
+    "Scaffold00022","Scaffold0152","Scaffold0150","Scaffold00034", \
+    "Scaffold00063","Scaffold00068","Scaffold0007","Scaffold00025", \
+    "Scaffold00066","Scaffold00032","Scaffold0010","Scaffold0011", \
+    "Scaffold00030_pilon","Scaffold00012","Scaffold0009","Scaffold00011", \
+    "Scaffold00067","Scaffold00027","Scaffold0142","Scaffold0012", \
+    "Scaffold0056","Scaffold0013"
+]
+
 # Writing the scaffolds of the Egyptian genome to separate fasta files because
 # processing the whole assembly often takes too much time
 rule write_scaffold_fastas:
@@ -50,6 +65,39 @@ rule write_scaffold_fastas:
                 with open(output[i], "w") as f_out:
                     SeqIO.write(record, f_out, "fasta")
                     i += 1
+
+# Writing the contigs of the Egyptian genome to separate fasta files because
+# processing the whole assembly often takes too much time
+rule write_contig_fastas:
+    input: "data/file.contigset.fasta"
+    output: expand("seq_CEGYPTREF/Homo_sapiens.CEGYPTREF.dna.{contig}.fa", \
+                   contig=CEGYPT_CONTIGS)
+    run:
+        with open(input[0], "r") as f_in:
+            for record in SeqIO.parse(f_in,"fasta"):            
+                # Remove the trailing "|arrow" since pipe symbols can cause
+                # problems and the "|arrow" is not needed
+                record.id = record.id[:-6]
+                record.name = ''
+                record.description = ''
+                record.seq = record.seq.upper()
+                out_fname = "seq_CEGYPTREF/Homo_sapiens.CEGYPTREF.dna." + \
+                               record.id+".fa"
+                with open(out_fname, "w") as f_out:
+                    SeqIO.write(record, f_out, "fasta")
+
+# Making a file with all contigs; this is the same as the 
+# data/file.contigset.fastafile provided by Novogene, but the "|arrow" in the
+# sequence names removed
+# Note: The original contig file has upper and lower-case letters, don't know
+# why! Perhaps repeatmasking was done with them? Anyway, I convert the sequences
+# to upper case, because repeatmasking is done later and should be as for the 
+# other assemblies
+rule combine_contigs_to_primary_assembly:
+    input: expand("seq_CEGYPTREF/Homo_sapiens.CEGYPTREF.dna.{contig}.fa", \
+                   contig=CEGYPT_CONTIGS)
+    output: "seq_CEGYPTREF/Homo_sapiens.CEGYPTREF.dna.primary_assembly.fa"
+    shell: "cat {input} > {output}"
 
 # Just getting the header lines of the individual sequences in the fasta
 rule scaffold_names:
@@ -464,10 +512,12 @@ rule dotplots_scaffold_vs_chromosomes:
 rule dotplots_scaffold_vs_chromosomes_all:
     input: #expand("align_lastz_GRCh38_vs_EGYPTREF/dotplots/{scaffold}.pdf", \
             #      scaffold=EGYPT_SCAFFOLDS),
-            expand("align_lastz_GRCh38_vs_YORUBA/dotplots/{scaffold}.pdf", \
-                  scaffold=YORUBA_SCAFFOLDS[:23])#,
+#            expand("align_lastz_GRCh38_vs_YORUBA/dotplots/{scaffold}.pdf", \
+#                  scaffold=YORUBA_SCAFFOLDS[:23]),
+            expand("align_lastz_GRCh38_vs_CEGYPTREF/dotplots/{contig}.pdf", \
+                  contig=CEGYPT_CONTIGS)#,
 #            expand("align_lastz_GRCh38_vs_AK1/dotplots/{scaffold}.pdf", \
-#                  scaffold=AK1_SCAFFOLDS)
+#                  scaffold=LONGEST_AK1_SCAFFOLDS)
 
 # All versus all comparisons of reference and Egyptian genome
 rule align_all_vs_all:
