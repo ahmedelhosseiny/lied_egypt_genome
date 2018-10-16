@@ -4,3 +4,4 @@ dependencies:
   - snakemake == 5.2.2
   - biopython == 1.70
   - samtools == 1.9
+  - tabix == 0.2.6

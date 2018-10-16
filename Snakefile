@@ -15,8 +15,41 @@ import os
 # Chromosome and scaffold names for later use
 CHR_GRCh38 = ["chromosome."+str(x) for x in range(1,23)] \
            + ["chromosome."+str(x) for x in ["MT","X","Y"]]
+
 EGYPT_SCAFFOLDS = ["fragScaff_scaffold_"+str(x)+"_pilon" for x in range(0,41)] \
                 + ["original_scaffold_"+str(x)+"_pilon" for x in range(41,145)]
+
+CHR_YORUBA = [x for x in CHR_GRCh38 if not x in ["chromosome.MT","chromosome.Y"]]
+
+YORUBA_SCAFFOLDS = []
+if os.path.exists("seq_YORUBA/yoruba_scaffold_to_genbank.txt"):
+    with open("seq_YORUBA/yoruba_scaffold_to_genbank.txt") as f_in:
+        for line in f_in:
+            s = line.split("\t")
+            if not "HS_" in line:
+                YORUBA_SCAFFOLDS.append("chromosome."+s[0])
+            else:
+                YORUBA_SCAFFOLDS.append(s[0])
+
+AK1_SCAFFOLDS = []
+if os.path.exists("seq_AK1/ak1_scaffold_to_genbank.txt"):
+    with open("seq_AK1/ak1_scaffold_to_genbank.txt") as f_in:
+        for line in f_in:
+            AK1_SCAFFOLDS.append(line.split("\t")[0])
+
+# Writing the scaffolds of the Egyptian genome to separate fasta files because
+# processing the whole assembly often takes too much time
+rule write_scaffold_fastas:
+    input: "data/pilon.fasta"
+    output: expand("seq_EGYPTREF/Homo_sapiens.EGYPTREF.dna.{scaffold}.fa", \
+                   scaffold=EGYPT_SCAFFOLDS)
+    run:
+        with open(input[0], "r") as f_in:
+            i = 0
+            for record in SeqIO.parse(f_in,"fasta"):            
+                with open(output[i], "w") as f_out:
+                    SeqIO.write(record, f_out, "fasta")
+                    i += 1
 
 # Just getting the header lines of the individual sequences in the fasta
 rule scaffold_names:
@@ -45,12 +78,15 @@ rule compute_assembly_stats:
 # Computing all info numbers:
 rule compute_content_and_assembly_numbers:
     input: expand( \
-           "results/GRCh38/{task}_Homo_sapiens.GRCh38.dna.primary_assembly.txt", \
-           task = ["scaffold_names","num_bases","num_all","assembly_stats"]),
-           expand( \
-           "results/EGYPTREF/{task}_Homo_sapiens.EGYPTREF.dna.primary_assembly.txt", \
+           "results/{assembly}/{task}_Homo_sapiens.{assembly}.dna.primary_assembly.txt", \
+           assembly = ["GRCh38","EGYPTREF","AK1","YORUBA"], \
            task = ["scaffold_names","num_bases","num_all","assembly_stats"])
-                       
+
+
+################################################################################
+############### Finding mammalian core genes as QC using busco #################
+################################################################################
+
 # Downloading the Busco lineage information
 rule download_linage:
     output: temp("busco_lineage/mammalia_odb9.tar.gz")
@@ -64,11 +100,6 @@ rule extract_lineage:
             "busco_lineage/mammalia_odb9/scores_cutoff"
     shell: "tar --directory busco_lineage -xvzf {input}"
 
-
-################################################################################
-############### Finding mammalian core genes as QC using busco #################
-################################################################################
-                    
 # Running Busco on a genome file
 # --force: Deleting results folder; start new run
 # --tmp: Likely /tmp is too small, so make a new tmp folder on scratch (also 
@@ -183,6 +214,88 @@ rule cp_and_rename_assembly:
 
 
 ################################################################################
+#### Getting the genome assembly (only chromosomes) of a Yoruba individual #####
+################################################################################
+
+# Getting the chromosome sequences from Genbank for 1000G individual NA19240,
+# which is a Yoruba female
+# Getting the assembly report
+rule get_yoruba_assembly_report:
+    output: "seq_YORUBA/GCA_001524155.4_NA19240_prelim_3.0_assembly_report.txt"
+    shell: "wget -P seq_YORUBA ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/001/524/155/GCA_001524155.4_NA19240_prelim_3.0/GCA_001524155.4_NA19240_prelim_3.0_assembly_report.txt"
+
+# Getting the scaffold names and the corresponding Genbank_ids from the report
+rule get_yoruba_scaffold_names:
+    input: "seq_YORUBA/GCA_001524155.4_NA19240_prelim_3.0_assembly_report.txt"
+    output: "seq_YORUBA/yoruba_scaffold_to_genbank.txt"
+    shell: "cat {input} | grep -v '#' | cut -f 1,5 > {output}"
+
+YORUBA_SCAFFOLD_TO_GENBANK = {}
+if os.path.exists("seq_YORUBA/yoruba_scaffold_to_genbank.txt"):
+    with open("seq_YORUBA/yoruba_scaffold_to_genbank.txt") as f_in:
+        for line in f_in:
+            s = line.strip("\n").split("\t")
+            if not "HS_" in line:
+                YORUBA_SCAFFOLD_TO_GENBANK["chromosome."+s[0]] = s[1]
+            else:
+                YORUBA_SCAFFOLD_TO_GENBANK[s[0]] = s[1]
+
+rule get_yoruba:
+    output: "seq_YORUBA/Homo_sapiens.YORUBA.dna.{id}.fa"
+    params: genbank_id=lambda wildcards: YORUBA_SCAFFOLD_TO_GENBANK[wildcards.id]
+    script: "scripts/get_genbank_seqs.py"
+
+rule get_yoruba_all:
+    input: expand("seq_YORUBA/Homo_sapiens.YORUBA.dna.{scaffold}.fa", \
+                  scaffold=YORUBA_SCAFFOLDS)
+
+rule yoruba_primary_assembly:
+    input: expand("seq_YORUBA/Homo_sapiens.YORUBA.dna.{scaffolds}.fa", \
+                  scaffolds=YORUBA_SCAFFOLDS)
+    output: "seq_YORUBA/Homo_sapiens.YORUBA.dna.primary_assembly.fa"
+    shell: "cat {input} > {output}"
+
+
+################################################################################
+#### Getting the genome assembly (all scaffolds) of a Korean individual ########": "
+################################################################################
+
+# Getting the assembly report
+rule get ak1_assembly_report:
+    output: "seq_AK1/GCA_001750385.2_AK1_v2_assembly_report.txt"
+    shell: "wget -P seq_AK1 ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/001/750/385/GCA_001750385.2_AK1_v2/GCA_001750385.2_AK1_v2_assembly_report.txt"
+
+# Getting the scaffold names and the corresponding Genbank_ids from the report
+rule get_ak1_scaffold_names:
+    input: "seq_AK1/GCA_001750385.2_AK1_v2_assembly_report.txt"
+    output: "seq_AK1/ak1_scaffold_to_genbank.txt"
+    shell: "cat {input} | grep -v '#' | cut -f 1,5 > {output}"
+
+AK1_SCAFFOLD_TO_GENBANK = {}
+if os.path.exists("seq_AK1/ak1_scaffold_to_genbank.txt"):
+    with open("seq_AK1/ak1_scaffold_to_genbank.txt") as f_in:
+        for line in f_in:
+            AK1_SCAFFOLD_TO_GENBANK[line.split("\t")[0]]=line.strip().split("\t")[-1]
+
+rule get_ak1:
+    input: "seq_AK1/ak1_scaffold_to_genbank.txt"
+    output: "seq_AK1/Homo_sapiens.AK1.dna.{scaffold}.fa"
+    params: genbank_id=lambda wildcards: AK1_SCAFFOLD_TO_GENBANK[wildcards.scaffold]
+    script: "scripts/get_genbank_seqs.py"
+
+rule get_ak1_all:
+    input: expand("seq_AK1/Homo_sapiens.AK1.dna.{scaffold}.fa", \
+                  scaffold=AK1_SCAFFOLDS)
+
+# Construct one file with all AK1 sequences (called "primary_assembly")
+rule ak1_primary_assembly:
+    input: expand("seq_AK1/Homo_sapiens.AK1.dna.{scaffold}.fa", \
+                  scaffold=AK1_SCAFFOLDS)
+    output: "seq_AK1/Homo_sapiens.AK1.dna.primary_assembly.fa"
+    shell: "cat {input} > {output}"
+
+
+################################################################################
 ######################### Repeat masking with repeatmasker #####################
 ################################################################################
 
@@ -236,7 +349,11 @@ rule run_repeatmasker_chromosomewise:
     input: expand("repeatmasked_GRCh38/Homo_sapiens.GRCh38.dna.{x}.fa.tbl", \
                   x=CHR_GRCh38),
            expand("repeatmasked_EGYPTREF/Homo_sapiens.EGYPTREF.dna.{x}.fa.tbl", \
-                  x=EGYPT_SCAFFOLDS)
+                  x=EGYPT_SCAFFOLDS),
+           expand("repeatmasked_AK1/Homo_sapiens.AK1.dna.{x}.fa.tbl", \
+                  x=AK1_SCAFFOLDS),
+           expand("repeatmasked_YORUBA/Homo_sapiens.YORUBA.dna.{x}.fa.tbl", \
+                  x=YORUBA_SCAFFOLDS)
 
 # Summarising the chromosome-wise repeatmasker summary files for Egyptref
 rule repeatmasker_summary_table_egyptref:
@@ -251,6 +368,20 @@ rule repeatmasker_summary_table_grch38:
                   x=CHR_GRCh38)
     output: "repeatmasked_GRCh38/summary.txt"
     script: "scripts/repeatmasker_summary.py"
+    
+# Summarising the chromosome-wise repeatmasker summary files for AK1
+rule repeatmasker_summary_table_ak1:
+    input: expand("repeatmasked_AK1/Homo_sapiens.AK1.dna.{x}.fa.tbl", \
+                  x=AK1_SCAFFOLDS)
+    output: "repeatmasked_AK1/summary.txt"
+    script: "scripts/repeatmasker_summary.py"
+
+# Summarising the chromosome-wise repeatmasker summary files for Yoruba
+rule repeatmasker_summary_table_yoruba:
+    input: expand("repeatmasked_YORUBA/Homo_sapiens.YORUBA.dna.{x}.fa.tbl", \
+                  x=YORUBA_SCAFFOLDS)
+    output: "repeatmasked_YORUBA/summary.txt"
+    script: "scripts/repeatmasker_summary.py"
 
 # Making a repeatmasker stat table over all chromosomes, one line for EGYPTREF,
 # one line for GRCh38
@@ -259,20 +390,6 @@ rule comparison_repeatmasker:
                   assembly=["EGYPTREF","GRCh38"])
     output: "results/repeatmasker_comparison.txt"
     script: "scripts/repeatmasker_comparison.py"
-
-# Writing the scaffolds of the Egyptian genome to separate fasta files because
-# processing the whole assembly often takes too much time
-rule write_scaffold_fastas:
-    input: "data/pilon.fasta"
-    output: expand("seq_EGYPTREF/Homo_sapiens.EGYPTREF.dna.{scaffold}.fa", \
-                   scaffold=EGYPT_SCAFFOLDS)
-    run:
-        with open(input[0], "r") as f_in:
-            i = 0
-            for record in SeqIO.parse(f_in,"fasta"):            
-                with open(output[i], "w") as f_out:
-                    SeqIO.write(record, f_out, "fasta")
-                    i += 1
 
 
 ################################################################################
@@ -314,9 +431,9 @@ rule write_scaffold_fastas:
 # --linearGap medium ? kenttools?
 rule align_with_lastz:
     input: "repeatmasked_GRCh38/Homo_sapiens.GRCh38.dna.{chr}.fa.masked",
-           "repeatmasked_EGYPTREF/Homo_sapiens.EGYPTREF.dna.{scaffold}.fa.masked"
-    output: "align_lastz_GRCh38_vs_EGYPTREF/{chr}_vs_{scaffold}.maf",
-            "align_lastz_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.rdotplot"
+           "repeatmasked_{assembly}/Homo_sapiens.{assembly}.dna.{scaffold}.fa.masked"
+    output: "align_lastz_GRCh38_vs_{assembly}/{chr}_vs_{scaffold}.maf",
+            "align_lastz_GRCh38_vs_{assembly}/dotplots/{chr}_vs_{scaffold}.rdotplot"
     conda: "envs/lastz.yaml"
     shell: "lastz {input[0]} {input[1]} " + \
                                   "--gapped " + \
@@ -331,22 +448,26 @@ rule align_with_lastz:
                                   ">{output[0]}"
 
 # Plot the dotplot output of lastz
-rule individual_lastz_dotplot:
-    input: "align_lastz_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.rdotplot"
-    output: "align_lastz_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.pdf"
-    script: "scripts/dotplot.R"
+#rule individual_lastz_dotplot:
+#    input: "align_lastz_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.rdotplot"
+#    output: "align_lastz_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.pdf"
+#    script: "scripts/dotplot.R"
 
 # Plotting for one scaffold the dotplot versus all chromosomes
 rule dotplots_scaffold_vs_chromosomes:
-    input: expand("align_lastz_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{{scaffold}}.rdotplot", \
+    input: expand("align_lastz_GRCh38_vs_{{assembly}}/dotplots/{chr}_vs_{{scaffold}}.rdotplot", \
                   chr=CHR_GRCh38)
-    output: "align_lastz_GRCh38_vs_EGYPTREF/dotplots/{scaffold}.pdf"
+    output: "align_lastz_GRCh38_vs_{assembly}/dotplots/{scaffold}.pdf"
     script: "scripts/scaffold_vs_grch38.R"            
 
 # Plotting the dotplots for all scaffolds
 rule dotplots_scaffold_vs_chromosomes_all:
-    input: expand("align_lastz_GRCh38_vs_EGYPTREF/dotplots/{scaffold}.pdf", \
-                  scaffold=EGYPT_SCAFFOLDS)
+    input: #expand("align_lastz_GRCh38_vs_EGYPTREF/dotplots/{scaffold}.pdf", \
+            #      scaffold=EGYPT_SCAFFOLDS),
+            expand("align_lastz_GRCh38_vs_YORUBA/dotplots/{scaffold}.pdf", \
+                  scaffold=YORUBA_SCAFFOLDS[:23])#,
+#            expand("align_lastz_GRCh38_vs_AK1/dotplots/{scaffold}.pdf", \
+#                  scaffold=AK1_SCAFFOLDS)
 
 # All versus all comparisons of reference and Egyptian genome
 rule align_all_vs_all:
@@ -496,6 +617,28 @@ rule run_nucdiff_all:
     input: expand("nucdiff_GRCh38_vs_EGYPTREF/results/GRCh38_vs_EGYPTREF_{chr}_stat.out", \
                   chr=CHR_GRCh38)
 
+rule run_nucdiff_for_assembly:
+    input: ref="seq_{a1}/Homo_sapiens.{a1}.dna.primary_assembly.fa", \
+           query="seq_{a2}/Homo_sapiens.{a2}.dna.primary_assembly.fa", \
+           delta="align_mummer_{a1}_vs_{a2}/assemblies/{a1}_vs_{a2}.delta"
+    output: "nucdiff_{a1}_vs_{a2}/assemblies/results/{a1}_vs_{a2}_ref_snps.gff", \
+            "nucdiff_{a1}_vs_{a2}/assemblies/results/{a1}_vs_{a2}_ref_struct.gff", \
+            "nucdiff_{a1}_vs_{a2}/assemblies/results/{a1}_vs_{a2}_ref_blocks.gff", \
+            "nucdiff_{a1}_vs_{a2}/assemblies/results/{a1}_vs_{a2}_ref_snps.vcf", \
+            "nucdiff_{a1}_vs_{a2}/assemblies/results/{a1}_vs_{a2}_query_snps.gff", \
+            "nucdiff_{a1}_vs_{a2}/assemblies/results/{a1}_vs_{a2}_query_struct.gff", \
+            "nucdiff_{a1}_vs_{a2}/assemblies/results/{a1}_vs_{a2}_query_blocks.gff", \
+            "nucdiff_{a1}_vs_{a2}/assemblies/results/{a1}_vs_{a2}_query_snps.vcf", \
+            "nucdiff_{a1}_vs_{a2}/assemblies/results/{a1}_vs_{a2}_stat.out"
+    params: outdir=lambda wildcards: "nucdiff_"+wildcards.a1+"_vs_"+wildcards.a2
+    conda: "envs/nucdiff.yaml"
+    shell: "nucdiff {input.ref} {input.query} {params.outdir} " + \
+           "{wildcards.a1}_vs_{wildcards.a2} " + \
+           "--vcf yes " + \
+           "--filter_opt '-l 1000 -i 99' " + \
+           "--delta_file {input.delta} " + \
+           "--proc 24"
+
 ################################################################################
 ######## Processing Illumina PE data for the assembled individual ##############
 ################################################################################
@@ -630,6 +773,16 @@ rule get_index_of_known_snps_from_dbsnp:
     output: "dbsnp_GRCh38/All_20180418.vcf.gz.tbi"
     shell: "wget -P dbsnp_GRCh38 " + \
            "ftp://ftp.ncbi.nlm.nih.gov/snp/organisms/human_9606/VCF/GATK/All_20180418.vcf.gz.tbi"
+
+rule unzip_dbsnp:
+    input: "dbsnp_GRCh38/All_20180418.vcf.gz"
+    output: "dbsnp_GRCh38/All_20180418.vcf"
+    shell: "zcat {input} > {output}"
+
+rule tabix_dbsnp:
+    input: "dbsnp_GRCh38/All_20180418.vcf"
+    output: "dbsnp_GRCh38/All_20180418.vcf.tbi"
+    shell: "tabix -p {input}"
 
 ### 1. map reads to genome
 # Mapping to reference/assembly using bwa
@@ -778,7 +931,7 @@ rule vc_reorder:
 ### 12. Base Quality Recalibration
 
 # Therefore, the fasta file needs to be indexed
-rule vc_inex_fasta:
+rule vc_index_fasta:
     input: "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa"
     output: "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.fai"
     shell: "samtools faidx {input}"
