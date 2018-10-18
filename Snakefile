@@ -127,7 +127,7 @@ rule compute_assembly_stats:
 rule compute_content_and_assembly_numbers:
     input: expand( \
            "results/{assembly}/{task}_Homo_sapiens.{assembly}.dna.primary_assembly.txt", \
-           assembly = ["GRCh38","EGYPTREF","AK1","YORUBA"], \
+           assembly = ["GRCh38","EGYPTREF","AK1","YORUBA","CEGYPTREF"], \
            task = ["scaffold_names","num_bases","num_all","assembly_stats"])
 
 
@@ -514,10 +514,10 @@ rule dotplots_scaffold_vs_chromosomes_all:
             #      scaffold=EGYPT_SCAFFOLDS),
 #            expand("align_lastz_GRCh38_vs_YORUBA/dotplots/{scaffold}.pdf", \
 #                  scaffold=YORUBA_SCAFFOLDS[:23]),
-            expand("align_lastz_GRCh38_vs_CEGYPTREF/dotplots/{contig}.pdf", \
-                  contig=CEGYPT_CONTIGS)#,
-#            expand("align_lastz_GRCh38_vs_AK1/dotplots/{scaffold}.pdf", \
-#                  scaffold=LONGEST_AK1_SCAFFOLDS)
+#            expand("align_lastz_GRCh38_vs_CEGYPTREF/dotplots/{contig}.pdf", \
+#                  contig=CEGYPT_CONTIGS),
+            expand("align_lastz_GRCh38_vs_AK1/dotplots/{scaffold}.pdf", \
+                   scaffold=LONGEST_AK1_SCAFFOLDS)
 
 # All versus all comparisons of reference and Egyptian genome
 rule align_all_vs_all:
@@ -1062,6 +1062,24 @@ rule unzip_ensembl_gene_annotation_gtf:
     input: "annotations/Homo_sapiens.GRCh38.94.gtf.gz"
     output: "annotations/Homo_sapiens.GRCh38.94.gtf"
     shell: "gzip -d {input}"
+
+# Extracting unmapped reads of the reference Egyptian for Axel, who wants to
+# run SOAP-denovo to compute a de-novo short-read assembly based on them
+rule get_unmapped_reads:
+    input: "variants_{assembly}/{sample}.final.bam"
+    output: "variants_{assembly}/{sample}.final.unmapped.bam"
+    shell: "samtools view -b -f 4 {input} > {output}"
+
+# Extracting reads that map to the mitochondrium
+# -F 4 extract mapped reads
+# -u output uncompressed sam
+# -b output bam
+rule mt_reads:
+    input: "variants_{assembly}/{sample}.final.bam"
+    output: "variants_{assembly}/{sample}.final.mt.bam"
+    shell: "samtools -H {input} > {output}.sam; " + \
+           "samtools view -F 4 {input} | grep -P \"\tMT\t\" >> {output}.sam; " + \
+           "samtools view -b {output}.sam > {output}; rm  {output}.sam"
 
 
 ################################################################################

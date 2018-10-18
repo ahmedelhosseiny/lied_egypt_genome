@@ -14,7 +14,7 @@ with open(fname_in, "rU") as handle:
 with open(fname_in, "rU") as handle, open(fname_out, "w") as f_out:
     header = ["SCAFFOLD","LEN","A","C","G","T","N"]
     header += ["PERCENT_A","PERCENT_C","PERCENT_G","PERCENT_T","PERCENT_BASES"]
-    f_out.write("\t".join(header))
+    f_out.write("\t".join(header)+"\n")
     for record in SeqIO.parse(handle, "fasta"):
         len_scaf = len(record)
         n_a = record.seq.count("A")
