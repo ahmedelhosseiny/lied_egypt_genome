@@ -1,4 +1,7 @@
 # Computing assembly statistics, i.e. N50, N60 etc.
+# We compute N50 in accordance with the NCBI N50 values, that is, the size of
+# the last scaffold entirely included within 50% of the bases; accordingly,
+# the L50 value is the number of contigs entirely included in 50% of bases
 
 # Getting input and output filenames
 fname_in = snakemake.input[0]
@@ -17,10 +20,13 @@ with open(fname_in,"r") as f_in, open(fname_out,"w") as f_out:
     for stat in stat_type:
         num_bases_to_sum = stat *n/100
         sum_scaffold_lens = 0
-        stop = False
+        num_contigs = 0
         for scaffold_len in lengths:
             if sum_scaffold_lens < num_bases_to_sum:
                 sum_scaffold_lens += scaffold_len
+                last_scaffold_len = scaffold_len
             else:
                 break
-        f_out.write("N"+str(stat)+": "+str(scaffold_len)+"\n")
+            num_contigs += 1
+        f_out.write("N"+str(stat)+": "+str(last_scaffold_len)+"\n")
+        f_out.write("L"+str(stat)+": "+str(num_contigs)+"\n")

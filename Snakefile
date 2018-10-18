@@ -832,7 +832,7 @@ rule unzip_dbsnp:
 rule tabix_dbsnp:
     input: "dbsnp_GRCh38/All_20180418.vcf"
     output: "dbsnp_GRCh38/All_20180418.vcf.tbi"
-    shell: "tabix -p {input}"
+    shell: "tabix -p vcf {input}"
 
 ### 1. map reads to genome
 # Mapping to reference/assembly using bwa
@@ -979,6 +979,20 @@ rule vc_reorder:
 # as HaplotypeCaller or MuTect2. "
 
 ### 12. Base Quality Recalibration
+# --knownSites / -knownSites: A database of known polymorphic sites. This 
+#                             algorithm treats every reference mismatch as an 
+#                             indication of error. However, real genetic 
+#                             variation is expected to mismatch the reference, 
+#                             so it is critical that a database of known 
+#                             polymorphic sites (e.g. dbSNP) is given to the 
+#                             tool in order to mask out those sites.
+# --covariate / -cov: One or more covariates to be used in the recalibration. 
+#                     Can be specified multiple times. Note that the ReadGroup 
+#                     and QualityScore covariates are required and do not need 
+#                     to be specified. Also, unless --no_standard_covs is 
+#                     specified, the Cycle and Context covariates are standard 
+#                     and are included by default. Use the --list argument to 
+#                     see the available covariates. 
 
 # Therefore, the fasta file needs to be indexed
 rule vc_index_fasta:
@@ -988,9 +1002,9 @@ rule vc_index_fasta:
 
 rule vc_base_recalibrator:
     input: "variants_{assembly}/{sample}.merged.rg.ordered.bam",
-           "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
-           "dbsnp_{assembly}/All_20180418.vcf.gz",
-           "dbsnp_{assembly}/All_20180418.vcf.gz.tbi"
+           "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa"#,
+#           "dbsnp_{assembly}/All_20180418.vcf"#,
+#           "dbsnp_{assembly}/All_20180418.vcf.tbi"
     output: "variants_{assembly}/{sample}.recal.csv"
     conda: "envs/variant_calling.yaml"
     shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
@@ -1002,7 +1016,7 @@ rule vc_base_recalibrator:
            "-cov CycleCovariate " + \
            "-cov ContextCovariate " + \
            "-o {output} " + \
-           "-knownSites {input[2]} " + \
+#           "-knownSites {input[2]} " + \
            "-nct 24"
 
 ### 13. Print Reads
@@ -1022,21 +1036,34 @@ rule vc_print_reads:
 
 ### 14. variant calling with GATK-HC
 # use GATK Haplotypecaller with runtime-optimized settings
+# --genotyping_mode / -gt_mode: Specifies how to determine the alternate alleles
+#                               to use for genotyping (DISCOVERY: The genotyper 
+#                               will choose the most likely alternate allele
+# --dbsnp / -D: dbSNP file rsIDs from this file are used to populate the ID 
+#               column of the output. Also, the DB INFO flag will be set when 
+#               appropriate. dbSNP is not used in any way for the calculations 
+#               themselves. 
+# --emitRefConfidence / -ERC: Mode for emitting reference confidence scores
+#                             Records whether the trimming intervals are going 
+#                             to be used to emit reference confidence
+#                             GVCF: Reference model emitted with condensed 
+#                             non-variant blocks, i.e. the GVCF format. 
 # -variant_index_type LINEAR -variant_index_parameter 128000 IW added because
 # the GATK program told me so and otherwise would exit with error.
 # java -XX:+UseConcMarkSweepGC -XX:ParallelGCThreads=4 -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar gatk 
 rule vc_snp_calling_with_gatk_hc:
     input: "variants_{assembly}/{sample}.final.bam",
-           "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
-           "dbsnp_{assembly}/All_20180418.vcf.gz",
-           "dbsnp_{assembly}/All_20180418.vcf.gz.tbi"
+           "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa"#,
+#           "dbsnp_{assembly}/All_20180418.vcf"#,
+#           "dbsnp_{assembly}/All_20180418.vcf.tbi"
     output: "variants_{assembly}/{sample}.vcf"
+    wildcard_constraints: sample="[A-Z,0-9]+"
     conda: "envs/variant_calling.yaml"
     shell: "java -XX:+UseConcMarkSweepGC -XX:ParallelGCThreads=4 -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
            "-T HaplotypeCaller " + \
            "-R {input[1]} " + \
            "-I {input[0]} " + \
-           "--dbsnp {input[2]} "
+#           "--dbsnp {input[2]} " + \
            "--genotyping_mode DISCOVERY " + \
            "-o {output} " + \
            "-ERC GVCF " + \
@@ -1044,11 +1071,28 @@ rule vc_snp_calling_with_gatk_hc:
            "-variant_index_parameter 128000 " + \
            "-nct 24"
 
+### 15. Perform joint genotyping on gVCF files produced by HaplotypeCaller
+rule joint_genotyping:
+    input: vcfs=expand("variants_{{assembly}}/{sample}.vcf", sample=[x for x in EGYPT_SAMPLES if not x in ["EGYPTREF","TEST"]]),
+           ref="seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
+           dbsnp="dbsnp_{assembly}/All_20180418.vcf"
+    output: "variants_{assembly}/egyptians.vcf"
+    conda: "envs/variant_calling.yaml"
+    params: variant_files=lambda wildcards, input: " --variant " + \
+                                                   " --variant ".join(input.vcfs)
+    shell: "java -XX:+UseConcMarkSweepGC -XX:ParallelGCThreads=4 -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
+           "-T GenotypeGVCFs " + \
+           "-R {input.ref} " + \
+           "{params.variant_files} " + \
+           "--dbsnp {input.dbsnp} " + \
+           "-o {output}"
+
 # Doing the variant calling for all 10 samples
 # and collecting alignment summary stats
 rule vc_snp_calling_with_gatk_hc_all:
     input: expand("variants_GRCh38/{sample}.vcf", sample=EGYPT_SAMPLES),
            expand("variants_GRCh38/{sample}.stats.txt", sample=EGYPT_SAMPLES)
+
 
 # Extracting variants within a certain genes (and near to it)
 
@@ -1074,12 +1118,15 @@ rule get_unmapped_reads:
 # -F 4 extract mapped reads
 # -u output uncompressed sam
 # -b output bam
+# What's done: 1) Writing header, 2) Getting MT aligned reads, 3) sam to bam
+# conversion 4) Removing intermediate sam file
 rule mt_reads:
     input: "variants_{assembly}/{sample}.final.bam"
-    output: "variants_{assembly}/{sample}.final.mt.bam"
+    output: "variants_{assembly}/{sample}.final.MT.bam"
     shell: "samtools -H {input} > {output}.sam; " + \
-           "samtools view -F 4 {input} | grep -P \"\tMT\t\" >> {output}.sam; " + \
-           "samtools view -b {output}.sam > {output}; rm  {output}.sam"
+           "samtools view {input} | grep -P \"\tMT\t\" >> {output}.sam; " + \
+           "samtools view -hb {output}.sam > {output}; " + \
+           "rm {output}.sam"
 
 
 ################################################################################

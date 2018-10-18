@@ -5,3 +5,4 @@ dependencies:
   - biopython == 1.70
   - samtools == 1.9
   - tabix == 0.2.6
+  - vcftools == 0.1.16
