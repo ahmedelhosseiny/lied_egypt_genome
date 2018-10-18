@@ -1002,8 +1002,8 @@ rule vc_index_fasta:
 
 rule vc_base_recalibrator:
     input: "variants_{assembly}/{sample}.merged.rg.ordered.bam",
-           "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa"#,
-#           "dbsnp_{assembly}/All_20180418.vcf"#,
+           "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
+           "dbsnp_{assembly}/All_20180418.vcf"
 #           "dbsnp_{assembly}/All_20180418.vcf.tbi"
     output: "variants_{assembly}/{sample}.recal.csv"
     conda: "envs/variant_calling.yaml"
@@ -1016,7 +1016,7 @@ rule vc_base_recalibrator:
            "-cov CycleCovariate " + \
            "-cov ContextCovariate " + \
            "-o {output} " + \
-#           "-knownSites {input[2]} " + \
+           "-knownSites {input[2]} " + \
            "-nct 24"
 
 ### 13. Print Reads
@@ -1123,7 +1123,7 @@ rule get_unmapped_reads:
 rule mt_reads:
     input: "variants_{assembly}/{sample}.final.bam"
     output: "variants_{assembly}/{sample}.final.MT.bam"
-    shell: "samtools -H {input} > {output}.sam; " + \
+    shell: "samtools view -H {input} > {output}.sam; " + \
            "samtools view {input} | grep -P \"\tMT\t\" >> {output}.sam; " + \
            "samtools view -hb {output}.sam > {output}; " + \
            "rm {output}.sam"
