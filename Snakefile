@@ -410,6 +410,13 @@ rule repeatmasker_summary_table_egyptref:
     output: "repeatmasked_EGYPTREF/summary.txt"
     script: "scripts/repeatmasker_summary.py"
 
+# Summarising the contig-wise repeatmasker summary files for Egyptref
+rule repeatmasker_summary_table_cegyptref:
+    input: expand("repeatmasked_CEGYPTREF/Homo_sapiens.CEGYPTREF.dna.{x}.fa.tbl", \
+                  x=CEGYPT_CONTIGS)
+    output: "repeatmasked_CEGYPTREF/summary.txt"
+    script: "scripts/repeatmasker_summary.py"
+
 # Summarising the chromosome-wise repeatmasker summary files for GRCh38
 rule repeatmasker_summary_table_grch38:
     input: expand("repeatmasked_GRCh38/Homo_sapiens.GRCh38.dna.{x}.fa.tbl", \
@@ -435,7 +442,7 @@ rule repeatmasker_summary_table_yoruba:
 # one line for GRCh38
 rule comparison_repeatmasker:
     input: expand("repeatmasked_{assembly}/summary.txt", \
-                  assembly=["EGYPTREF","GRCh38"])
+                  assembly=["CEGYPTREF","AK1","YORUBA","GRCh38"])
     output: "results/repeatmasker_comparison.txt"
     script: "scripts/repeatmasker_comparison.py"
 
@@ -1002,8 +1009,8 @@ rule vc_index_fasta:
 
 rule vc_base_recalibrator:
     input: "variants_{assembly}/{sample}.merged.rg.ordered.bam",
-           "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
-           "dbsnp_{assembly}/All_20180418.vcf"
+           "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa"#,
+#           "dbsnp_{assembly}/All_20180418.vcf"
 #           "dbsnp_{assembly}/All_20180418.vcf.tbi"
     output: "variants_{assembly}/{sample}.recal.csv"
     conda: "envs/variant_calling.yaml"
@@ -1016,7 +1023,7 @@ rule vc_base_recalibrator:
            "-cov CycleCovariate " + \
            "-cov ContextCovariate " + \
            "-o {output} " + \
-           "-knownSites {input[2]} " + \
+#           "-knownSites {input[2]} " + \
            "-nct 24"
 
 ### 13. Print Reads
@@ -1072,20 +1079,32 @@ rule vc_snp_calling_with_gatk_hc:
            "-nct 24"
 
 ### 15. Perform joint genotyping on gVCF files produced by HaplotypeCaller
+# --intervals / -L: One or more genomic intervals over which to operate
 rule joint_genotyping:
     input: vcfs=expand("variants_{{assembly}}/{sample}.vcf", sample=[x for x in EGYPT_SAMPLES if not x in ["EGYPTREF","TEST"]]),
            ref="seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
            dbsnp="dbsnp_{assembly}/All_20180418.vcf"
-    output: "variants_{assembly}/egyptians.vcf"
+    output: "variants_{assembly}/egyptians.chromosome.{chr}.vcf"
     conda: "envs/variant_calling.yaml"
     params: variant_files=lambda wildcards, input: " --variant " + \
                                                    " --variant ".join(input.vcfs)
-    shell: "java -XX:+UseConcMarkSweepGC -XX:ParallelGCThreads=4 -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
+    shell: "rm -rf /scratch/tmp_gatk_{wildcards.chr}; " + \
+           "mkdir /scratch/tmp_gatk_{wildcards.chr}; " + \
+           "java -XX:+UseConcMarkSweepGC -XX:ParallelGCThreads=4 -Xmx80g " + \
+           "-Djava.io.tmpdir=/scratch/tmp_gatk_{wildcards.chr} " + \
+           "-jar .snakemake/conda/d590255f/opt/gatk-3.8/GenomeAnalysisTK.jar " + \
            "-T GenotypeGVCFs " + \
            "-R {input.ref} " + \
            "{params.variant_files} " + \
-           "--dbsnp {input.dbsnp} " + \
-           "-o {output}"
+#           "--dbsnp {input.dbsnp} " + \
+           "--num_threads 24 " + \
+           "--intervals {wildcards.chr} " + \
+           "-o {output}; " + \
+           "rm -r /scratch/tmp_gatk_{wildcards.chr}; "
+
+rule joint_genotyping_all:
+    input: expand("variants_{assembly}/egyptians.{chr}.vcf", \
+                  assembly=["GRCh38"],chr=CHR_GRCh38)
 
 # Doing the variant calling for all 10 samples
 # and collecting alignment summary stats
