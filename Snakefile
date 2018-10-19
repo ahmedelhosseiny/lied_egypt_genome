@@ -1079,9 +1079,24 @@ rule vc_snp_calling_with_gatk_hc:
            "-nct 24"
 
 ### 15. Perform joint genotyping on gVCF files produced by HaplotypeCaller
+
+# Therefore, split GATK HC files chromosome-wise
+rule vc_split_gatk_hc_chromosomewise:
+    input: "variants_{assembly}/{sample}.vcf"
+    output: "variants_{assembly}/{sample}.chromosome.{chr}.vcf"
+    shell: "head -n 1000 {input} | grep '#' > {output}; " + \
+           "cat {input} | grep -P '^{wildcards.chr}\t' >> {output}; "
+
+rule vc_split_gatk_hc_chromosomewise_all:
+    input: expand("variants_{assembly}/{sample}.{chr}.vcf", \
+                  assembly=["GRCh38"], \
+                  sample=["PD82"], \
+                  chr=CHR_GRCh38)
+                  #[x for x in EGYPT_SAMPLES if not x in ["EGYPTREF","TEST"]], \
+
 # --intervals / -L: One or more genomic intervals over which to operate
-rule joint_genotyping:
-    input: vcfs=expand("variants_{{assembly}}/{sample}.vcf", sample=[x for x in EGYPT_SAMPLES if not x in ["EGYPTREF","TEST"]]),
+rule vc_joint_genotyping:
+    input: vcfs=expand("variants_{{assembly}}/{sample}.chromosome.{{chr}}.vcf", sample=[x for x in EGYPT_SAMPLES if not x in ["EGYPTREF","TEST"]]),
            ref="seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
            dbsnp="dbsnp_{assembly}/All_20180418.vcf"
     output: "variants_{assembly}/egyptians.chromosome.{chr}.vcf"
@@ -1102,7 +1117,7 @@ rule joint_genotyping:
            "-o {output}; " + \
            "rm -r /scratch/tmp_gatk_{wildcards.chr}; "
 
-rule joint_genotyping_all:
+rule vc_joint_genotyping_all:
     input: expand("variants_{assembly}/egyptians.{chr}.vcf", \
                   assembly=["GRCh38"],chr=CHR_GRCh38)
 
