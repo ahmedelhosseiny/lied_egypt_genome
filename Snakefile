@@ -1117,8 +1117,13 @@ rule vc_joint_genotyping:
            "-o {output}; " + \
            "rm -r /scratch/tmp_gatk_{wildcards.chr}; "
 
+rule vc_compress_vcf:
+    input: "variants_{assembly}/egyptians.{chr}.vcf"
+    output: "variants_{assembly}/egyptians.{chr}.vcf.gz"
+    shell: "cat {input} | bgzip > {output} "
+
 rule vc_joint_genotyping_all:
-    input: expand("variants_{assembly}/egyptians.{chr}.vcf", \
+    input: expand("variants_{assembly}/egyptians.{chr}.vcf.gz", \
                   assembly=["GRCh38"],chr=CHR_GRCh38)
 
 # Doing the variant calling for all 10 samples
@@ -1253,3 +1258,265 @@ rule count_pacbio_reads:
             f_out.write("Sum"+ "\t"+sum+"\n")
                 
     
+################################################################################
+##### Population stratification analysis using Eigenstrat (e.g. PC plots) ######
+################################################################################
+
+# Downloading 1000 genomes data
+rule download_1000g_genotypes:
+    output: "1000_genomes/ALL.chr{chr}_GRCh38.genotypes.20170504.vcf.gz"
+    shell: "wget -P 1000_genomes/ http://ftp.1000genomes.ebi.ac.uk/vol1/" + \
+                                  "ftp/release/20130502/supporting/" + \
+                                  "GRCh38_positions/" + \
+                                  "ALL.chr{wildcards.chr}_GRCh38.genotypes.20170504.vcf.gz"
+
+# Downloading 1000 genomes data (index)
+rule download_1000g_genotypes_index:
+    output: "1000_genomes/ALL.chr{chr}_GRCh38.genotypes.20170504.vcf.gz.tbi"
+    shell: "wget -P 1000_genomes/ http://ftp.1000genomes.ebi.ac.uk/vol1/" + \
+                                  "ftp/release/20130502/supporting/" + \
+                                  "GRCh38_positions/" + \
+                                  "ALL.chr{wildcards.chr}_GRCh38.genotypes.20170504.vcf.gz.tbi"
+
+# Downloading 1000 genomes data (Readme)
+rule download_1000g_genotypes_readme:
+    output: "1000_genomes/README_GRCh38_liftover_20170504.txt"
+    shell: "wget -P 1000_genomes/ http://ftp.1000genomes.ebi.ac.uk/vol1/" + \
+                                  "ftp/release/20130502/supporting/" + \
+                                  "GRCh38_positions/" + \
+                                  "README_GRCh38_liftover_20170504.txt"
+
+# Get the ped file which contains the population of the samples (and more info)
+rule download_1000g_genotypes_ped:
+    output: "1000_genomes/integrated_call_samples_v2.20130502.ALL.ped"
+    shell: "wget -P 1000_genomes/ http://ftp.1000genomes.ebi.ac.uk/vol1/" + \
+                                  "ftp/release/20130502/" + \
+                                  "integrated_call_samples_v2.20130502.ALL.ped"
+
+rule download_1000g_genotypes_all:
+    input: expand("1000_genomes/ALL.chr{chr}_GRCh38.genotypes.20170504.vcf.gz", \
+                   chr=[str(x) for x in range(1,23)]+["X","Y"]), \
+           expand("1000_genomes/ALL.chr{chr}_GRCh38.genotypes.20170504.vcf.gz.tbi", \
+                   chr=[str(x) for x in range(1,23)]+["X","Y"]), \
+           "1000_genomes/README_GRCh38_liftover_20170504.txt", \
+           "1000_genomes/integrated_call_samples_v2.20130502.ALL.ped"
+
+# Selecting 1000G individuals for inclusion in Stratification analysis
+# We select individuals belonging to populations of interest and which
+# have phase3 genotypes avaliable (this is column 14) 
+# ACB: African Caribbeans in Barbados
+# ASW: Americans of African Ancestry in SW USA 	
+# CEU: Utah Residents (CEPH) with Northern and Western European Ancestry
+# ESN: Esan in Nigeria
+# FIN: Finnish in Finland
+# GBR: British in England and Scotland
+# GWD: Gambian in Western Divisions in the Gambia
+# IBS: Iberian Population in Spain
+# LWK: Luhya in Webuye, Kenya
+# MSL: Mende in Sierra Leone
+# TSI: Toscani in Italia
+# YRI: Yoruba in Ibadan, Nigeria
+POPULATIONS_1000G = [
+"ACB","ASW","CEU","ESN","FIN","GBR","GWD","IBS","LWK","MSL","TSI","YRI"
+]
+rule select_pop_from_1000g:
+    input: "1000_genomes/integrated_call_samples_v2.20130502.ALL.ped"
+    output: "genotype_pcs/keep_indiv.txt"
+    run:
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                s = line.split("\t")
+                if s[6] in POPULATIONS_1000G and s[13] == "1":
+                    f_out.write(s[1]+"\n")
+
+# Selecting from the VCF files those individuals that are to be used
+# Keeping only variants with at last 5% MAF
+# Keeping only variants not violating Hardy-Weinberg-Equilibrium
+# Keeping only bi-allelic variants (min-allele = max-allele = 2)
+rule select_1000g_individual_genotypes:
+    input: "1000_genomes/ALL.chr{chr}_GRCh38.genotypes.20170504.vcf.gz",
+           "genotype_pcs/keep_indiv.txt"
+    output: "genotype_pcs/AFR_EUR.chr{chr}_GRCh38.vcf.gz",
+            "genotype_pcs/AFR_EUR.chr{chr}_GRCh38.log"
+    params: log_base=lambda wildcards, output: output[1][:-4]
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--keep {input[1]} " + \
+                    "--min-alleles 2 " + \
+                    "--max-alleles 2 " + \
+                    "--maf 0.05 " + \
+                    "--hwe 0.000001 " + \
+                    "--recode-INFO-all " + \
+                    "--recode " + \
+                    "--out {params.log_base} " + \
+                    "--stdout | bgzip > {output[0]}"
+
+# Compressing and indexing of files to be used with vcf-merge
+rule index_1000g:
+    input: "genotype_pcs/AFR_EUR.chr{chr}_GRCh38.vcf.gz"
+    output: "genotype_pcs/AFR_EUR.chr{chr}_GRCh38.vcf.gz.tbi"
+    shell: "tabix -p vcf {input}"
+
+# Getting the list of SNPs for genotype PCs from the 1000 Genomes samples
+rule get_1000g_snps:
+    input: "genotype_pcs/AFR_EUR.chr{chr}_GRCh38.vcf.gz"
+    output: "genotype_pcs/snps_chr{chr}.txt"
+    shell: "zcat {input} | grep -v '#' | cut -f 1,2 > {output}"
+
+# Here, we select from the SNPs called for the egyptians those, which are also
+# kept from the 1000 genomes samples, i.e. 5% MAF, HWE, bi-allelic
+rule select_matching_egyptian_snps:
+    input: "variants_GRCh38/egyptians.chromosome.{chr}.vcf.gz",
+           "genotype_pcs/snps_chr{chr}.txt"
+    output: "genotype_pcs/egyptians.chromosome.{chr}.vcf.gz",
+            "genotype_pcs/egyptians.chromosome.{chr}.log"
+    params: log_base=lambda wildcards, output: output[1][:-4]
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--positions {input[1]} " + \
+                    "--recode-INFO-all " + \
+                    "--recode " + \
+                    "--out {params.log_base} " + \
+                    "--stdout | bgzip > {output[0]}"
+
+# Compressing and indexing of files to be used with vcf-merge
+rule index_egyptians:
+    input: "genotype_pcs/egyptians.chromosome.{chr}.vcf.gz"
+    output: "genotype_pcs/egyptians.chromosome.{chr}.vcf.gz.tbi"
+    shell: "tabix -p vcf {input}"
+
+# Merging the vcf-files of 1000 genomes with our SNP calls for the egyptians
+rule merge_1000g_with_egyptians:
+    input: "genotype_pcs/egyptians.chromosome.{chr}.vcf.gz",
+           "genotype_pcs/egyptians.chromosome.{chr}.vcf.gz.tbi",
+           "genotype_pcs/AFR_EUR.chr{chr}_GRCh38.vcf.gz",
+           "genotype_pcs/AFR_EUR.chr{chr}_GRCh38.vcf.gz.tbi"
+    output: "genotype_pcs/EGYPT_AFR_EUR.chr{chr}_GRCh38.vcf.gz"
+    shell: "vcf-merge {input[0]} {input[2]} | bgzip > {output[0]}"
+
+rule merge_1000g_with_egyptians_all:
+    input: expand("genotype_pcs/EGYPT_AFR_EUR.chr{chr}_GRCh38.vcf.gz", \
+                   chr=[str(x) for x in range(1,23)]+["X","Y"])
+
+# Removal of regions of high LD and/or known inversions from Abraham 2014, i.e. Fellay 2009:
+# chr6:25 Mb–33.5 Mb, (see also Wang 2009)
+# chr5:44 Mb–51.5 Mb, chr8:8 Mb–12 Mb, chr11:45 Mb–57 Mb
+rule find_snps_from_high_ld_regions:
+   input: "{analysis}/plink/{filename}_filtered.ped", "{analysis}/plink/{filename}_filtered.map"
+   output: "{analysis}/plink/{filename}_6_25-33.5.snplist",
+           "{analysis}/plink/{filename}_5_44-51.5.snplist",
+           "{analysis}/plink/{filename}_8_8-12.snplist",
+           "{analysis}/plink/{filename}_11_45-57.snplist",
+           "{analysis}/plink/{filename}_exclusion.snplist" 
+   run: 
+      # Make lists of SNPs in the respective regions to be removed
+      shell("p-link --ped {input[0]} --map {input[1]} --allow-no-sex --chr 6 --from-mb 25 --to-mb 33.5 --write-snplist --out {wildcards.analysis}/plink/{wildcards.filename}_6_25-33.5")
+      shell("p-link --ped {input[0]} --map {input[1]} --allow-no-sex --chr 5 --from-mb 44 --to-mb 51.5 --write-snplist --out {wildcards.analysis}/plink/{wildcards.filename}_5_44-51.5")
+      shell("p-link --ped {input[0]} --map {input[1]} --allow-no-sex --chr 8 --from-mb 8 --to-mb 12 --write-snplist --out {wildcards.analysis}/plink/{wildcards.filename}_8_8-12")
+      shell("p-link --ped {input[0]} --map {input[1]} --allow-no-sex --chr 11 --from-mb 45 --to-mb 57 --write-snplist --out {wildcards.analysis}/plink/{wildcards.filename}_11_45-57")
+      # Concatenate all the SNPs to be removed
+      shell("cat {output[0]} {output[1]} {output[2]} {output[3]}  > {output[4]}")
+
+rule exclude_snps_from_high_ld_regions:
+   input: "{analysis}/plink/{filename}_filtered.ped", "{analysis}/plink/{filename}_filtered.map", "{analysis}/plink/{filename}_exclusion.snplist"
+   output: "{analysis}/plink/{filename}_wo_ldregions.ped", "{analysis}/plink/{filename}_wo_ldregions.map"
+   shell: "p-link --ped {input[0]} --map {input[1]} --exclude {input[2]} --recode --out {wildcards.analysis}/plink/{wildcards.filename}_wo_ldregions"
+
+# LD prune the PLINK ped/map files; therefore, first make a list of SNPs in LD (and not in LD)
+# (i.e. to be removed or not)
+# Parameters for indep-pairwise: [window size]<kb> [step size (variant ct)] [VIF threshold]
+# Explanation Plink website): the command above that specifies 50 5 0.5 would 
+# a) consider a window of 50 SNPs, 
+# b) calculate LD between each pair of SNPs in the window, 
+# c) remove one of a pair of SNPs if the LD is greater than 0.5, 
+# d) shift the window 5 SNPs forward and repeat the procedure
+# Abraham 2014 used: 1000 10 0.02
+# Anderson 2010 used: 50 5 0.2
+# Wang 2009 used: 100 ? 0.2
+# Fellay 2009 used: 1500 150 0.2 
+rule find_ld_pruned_snps:
+   input: "{analysis}/plink/{filename}_wo_ldregions.ped", "{analysis}/plink/{filename}_wo_ldregions.map"
+   output: "{analysis}/plink/{filename}_plink.prune.in","{analysis}/plink/{filename}_plink.prune.out"
+   run:
+      shell("p-link --ped {input[0]} --map {input[1]} --allow-no-sex --indep-pairwise 1000 10 0.2 --out {wildcards.analysis}/plink/{wildcards.filename}_plink")
+
+rule exclude_ld_pruned_snps:
+   input: "{analysis}/plink/{filename}_wo_ldregions.ped", "{analysis}/plink/{filename}_wo_ldregions.map", "{analysis}/plink/{filename}_plink.prune.out"
+   output: "{analysis}/plink/{filename}_wo_ldregions_pruned.ped", "{analysis}/plink/{filename}_wo_ldregions_pruned.map"
+   shell: "p-link --ped {input[0]} --map {input[1]} --allow-no-sex --exclude {input[2]} --out {wildcards.analysis}/plink/{wildcards.filename}_wo_ldregions_pruned --recode"
+
+# Conversion using Eigensoft's convertf ignores all samples if in column 6 is a zero; therefore
+# replace column 6's zero
+rule change_ped_file_column6:
+   input: "{analysis}/plink/{filename}_wo_ldregions_pruned.ped","{analysis}/plink/{filename}_wo_ldregions_pruned.map"
+   output: "{analysis}/plink/{filename}_for_pca_computation.ped","{analysis}/plink/{filename}_for_pca_computation.map"
+   run: 
+      with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+         for line in f_in:
+            splitted_line = line.split()
+            sample = splitted_line[1]
+            f_out.write("\t".join(splitted_line[:5])+"\t"+str(1)+"\t"+"\t".join(splitted_line[6:])+"\n")
+      shell("cp {input[1]} {output[1]}")
+
+# This is the actual conversion from ped format to the eigenstrat input format
+rule ped_to_eigentstrat:
+   input: "{analysis}/plink/{filename}_for_pca_computation.ped","{analysis}/plink/{filename}_for_pca_computation.map"
+   output: "{analysis}/eigenstrat/{filename}.ped2eigenstrat.params","{analysis}/eigenstrat/{filename}.eigenstratgeno",
+           "{analysis}/eigenstrat/{filename}.snp","{analysis}/eigenstrat/{filename}.ind"
+   run: 
+      # Write the parameter file needed by the Eigensoft convertf program
+      with open(output[0],"w") as f_out:
+         f_out.write("genotypename:    "+input[0]+"\n")
+         f_out.write("snpname:         "+input[1]+"\n") 
+         f_out.write("indivname:       "+input[0]+"\n")
+         f_out.write("outputformat:    EIGENSTRAT\n")
+         f_out.write("genotypeoutname: "+output[1]+"\n")
+         f_out.write("snpoutname:      "+output[2]+"\n")
+         f_out.write("indivoutname:    "+output[3]+"\n")
+         f_out.write("familynames:     NO\n")
+      shell("convertf -p {output[0]}")
+
+
+# Running Eigensofts smartpca module which computes the population PCs
+# The smartpca parameters:
+# -i example.geno  : genotype file in any format (see ../CONVERTF/README)
+# -a example.snp   : snp file in any format (see ../CONVERTF/README)
+# -b example.ind   : indiv file in any format (see ../CONVERTF/README)
+# -k k             : (Default is 10) number of principal components to output
+# -o example.pca   : output file of principal components.  Individuals removed
+#                    as outliers will have all values set to 0.0 in this file.
+# -p example.plot  : prefix of output plot files of top 2 principal components.
+#                    (labeling individuals according to labels in indiv file)
+# -e example.eval  : output file of all eigenvalues
+# -l example.log   : output logfile
+# -m maxiter       : (Default is 5) maximum number of outlier removal iterations.
+#                    To turn off outlier removal, set -m 0.
+# -t topk          : (Default is 10) number of principal components along which 
+#                    to remove outliers during each outlier removal iteration.
+# -s sigma         : (Default is 6.0) number of standard deviations which an
+#                    individual must exceed, along one of topk top principal
+# 		               components, in order to be removed as an outlier.
+rule eigensoft_smartpca:
+   input: "{analysis}/eigenstrat/{filename}.eigenstratgeno","{analysis}/eigenstrat/{filename}.snp",
+          "{analysis}/eigenstrat/{filename}.ind"
+   output: "{analysis}/eigenstrat/{filename}.pca","{analysis}/eigenstrat/{filename}.plot.pdf",
+           "{analysis}/eigenstrat/{filename}.eval","{analysis}/eigenstrat/{filename}.log",
+           "{analysis}/eigenstrat/{filename}.pca.evec"
+   run:
+      shell("smartpca.perl -i {input[0]} -a {input[1]} -b {input[2]} -o {output[0]} -p {wildcards.analysis}/eigenstrat/{wildcards.filename}.plot -e {output[2]} -l {output[3]} -m 0")
+      shell("mv {wildcards.filename}.plot.pdf {wildcards.analysis}/eigenstrat/.")
+
+
+# Computing the Tracy-Widom statistics to evaluate the statistical 
+# significance of each principal component identified by pca
+rule tracy_widom_pval:
+   input: "{analysis}/eigenstrat/{filename}.eval","annotation/twtable"
+   output: "{analysis}/eigenstrat/{filename}.tw"
+   shell: "twstats -i {input[0]} -t {input[1]} -o {output[0]}"
+
+# Plotting the PCs
+rule plot_gt_pcs:
+   input: "{analysis}/eigenstrat/{filename}.pca.evec", "annotation/annotation_{analysis}.txt"
+   output: "{analysis}/figures/{filename}_pca_1vs2.pdf", "{analysis}/figures/{filename}_pca_1vs3.pdf",
+           "{analysis}/figures/{filename}_pca_1vs4.pdf", "{analysis}/figures/{filename}_pca_2vs3.pdf", 
+           "{analysis}/figures/{filename}_pca_2vs4.pdf", "{analysis}/figures/{filename}_pca_3vs4.pdf",
+           "{analysis}/figures/{filename}_scree_plot.pdf"
+   shell: "Rscript scripts/plot_gt_pcs.r {input[0]} {wildcards.analysis}/figures/{wildcards.filename} {input[1]}"
