@@ -1336,9 +1336,8 @@ rule select_pop_from_1000g:
 rule select_1000g_individual_genotypes:
     input: "1000_genomes/ALL.chr{chr}_GRCh38.genotypes.20170504.vcf.gz",
            "genotype_pcs/keep_indiv.txt"
-    output: "genotype_pcs/AFR_EUR.chr{chr}_GRCh38.vcf.gz",
-            "genotype_pcs/AFR_EUR.chr{chr}_GRCh38.log"
-    params: log_base=lambda wildcards, output: output[1][:-4]
+    output: "genotype_pcs/AFR_EUR.chr{chr}_GRCh38.vcf.gz"
+    params: log_base=lambda wildcards, output: output[0][:-7]
     shell: "vcftools --gzvcf {input[0]} " + \
                     "--keep {input[1]} " + \
                     "--min-alleles 2 " + \
@@ -1367,9 +1366,8 @@ rule get_1000g_snps:
 rule select_matching_egyptian_snps:
     input: "variants_GRCh38/egyptians.chromosome.{chr}.vcf.gz",
            "genotype_pcs/snps_chr{chr}.txt"
-    output: "genotype_pcs/egyptians.chromosome.{chr}.vcf.gz",
-            "genotype_pcs/egyptians.chromosome.{chr}.log"
-    params: log_base=lambda wildcards, output: output[1][:-4]
+    output: "genotype_pcs/egyptians.chromosome.{chr}.vcf.gz"
+    params: log_base=lambda wildcards, output: output[0][:-7]
     shell: "vcftools --gzvcf {input[0]} " + \
                     "--positions {input[1]} " + \
                     "--recode-INFO-all " + \
