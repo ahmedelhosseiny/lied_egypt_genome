@@ -6,3 +6,4 @@ dependencies:
   - samtools == 1.9
   - tabix == 0.2.6
   - vcftools == 0.1.16
+  - plink2 == 1.90b3.35

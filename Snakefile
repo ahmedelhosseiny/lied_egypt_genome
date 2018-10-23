@@ -1041,6 +1041,16 @@ rule vc_print_reads:
            "-BQSR {input[2]} " + \
            "-nct 24"
 
+# Making some simple stats about the number of mapped reads etc.
+rule vc_flagstat:
+    input: "variants_{assembly}/{sample}.final.bam"
+    output: "variants_{assembly}/{sample}.final.flagstat.txt"
+    shell: "samtools flagstat {input} > {output}"
+
+rule vc_flagstat_all:
+    input: expand("variants_{assembly}/{sample}.final.flagstat.txt", \
+                  assembly=["GRCh38"], sample=EGYPT_SAMPLES)
+
 ### 14. variant calling with GATK-HC
 # use GATK Haplotypecaller with runtime-optimized settings
 # --genotyping_mode / -gt_mode: Specifies how to determine the alternate alleles
@@ -1048,7 +1058,7 @@ rule vc_print_reads:
 #                               will choose the most likely alternate allele
 # --dbsnp / -D: dbSNP file rsIDs from this file are used to populate the ID 
 #               column of the output. Also, the DB INFO flag will be set when 
-#               appropriate. dbSNP is not used in any way for the calculations 
+#               appropriate. dbSNP is not used in any way for the calculations
 #               themselves. 
 # --emitRefConfidence / -ERC: Mode for emitting reference confidence scores
 #                             Records whether the trimming intervals are going 
@@ -1319,6 +1329,8 @@ rule download_1000g_genotypes_all:
 POPULATIONS_1000G = [
 "ACB","ASW","CEU","ESN","FIN","GBR","GWD","IBS","LWK","MSL","TSI","YRI"
 ]
+POPULATIONS_AFR = ["ACB","ASW","ESN","GWD","LWK","MSL","YRI"]
+POPULATIONS_EUR = ["CEU","FIN","GBR","IBS","TSI"]
 rule select_pop_from_1000g:
     input: "1000_genomes/integrated_call_samples_v2.20130502.ALL.ped"
     output: "genotype_pcs/keep_indiv.txt"
@@ -1329,15 +1341,40 @@ rule select_pop_from_1000g:
                 if s[6] in POPULATIONS_1000G and s[13] == "1":
                     f_out.write(s[1]+"\n")
 
+# Make an annotation file with sample names and population for plotting
+rule gp_make_pop_annotation:
+    input: "1000_genomes/integrated_call_samples_v2.20130502.ALL.ped"
+    output: "genotype_pcs/annotation_EGYPT_AFR_EUR_GRCh38.txt"
+    run:
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            # First write the egyptians
+            for egyptian in [x for x in EGYPT_SAMPLES if not x in ["EGYPTREF","TEST"]]:
+                # PD114, PD115, PD82 are from Upper Egypt
+                if egyptian[:2] == "PD":
+                    f_out.write(egyptian+"\tEGU\tEGY\n")
+                # LU18, LU19, LU2, LU22. LU23, LU9, and Egyptref are from Delta
+                else:
+                    f_out.write(egyptian+"\tEGD\tEGY\n")
+            # Then the 1000G samples
+            for line in f_in:
+                s = line.split("\t")
+                pop = s[6]
+                if pop in POPULATIONS_1000G and s[13] == "1":
+                    if pop in POPULATIONS_AFR:
+                        f_out.write(s[1]+"\t"+pop+"\tAFR\n")
+                    elif pop in POPULATIONS_EUR:
+                        f_out.write(s[1]+"\t"+pop+"\tEUR\n")
+
 # Selecting from the VCF files those individuals that are to be used
 # Keeping only variants with at last 5% MAF
 # Keeping only variants not violating Hardy-Weinberg-Equilibrium
 # Keeping only bi-allelic variants (min-allele = max-allele = 2)
-rule select_1000g_individual_genotypes:
+rule gp_select_1000g_individual_genotypes:
     input: "1000_genomes/ALL.chr{chr}_GRCh38.genotypes.20170504.vcf.gz",
            "genotype_pcs/keep_indiv.txt"
     output: "genotype_pcs/AFR_EUR.chr{chr}_GRCh38.vcf.gz"
     params: log_base=lambda wildcards, output: output[0][:-7]
+    conda: "envs/genotype_pcs.yaml"
     shell: "vcftools --gzvcf {input[0]} " + \
                     "--keep {input[1]} " + \
                     "--min-alleles 2 " + \
@@ -1350,24 +1387,26 @@ rule select_1000g_individual_genotypes:
                     "--stdout | bgzip > {output[0]}"
 
 # Compressing and indexing of files to be used with vcf-merge
-rule index_1000g:
+rule gp_index_1000g:
     input: "genotype_pcs/AFR_EUR.chr{chr}_GRCh38.vcf.gz"
     output: "genotype_pcs/AFR_EUR.chr{chr}_GRCh38.vcf.gz.tbi"
+    conda: "envs/genotype_pcs.yaml"
     shell: "tabix -p vcf {input}"
 
 # Getting the list of SNPs for genotype PCs from the 1000 Genomes samples
-rule get_1000g_snps:
+rule gp_get_1000g_snps:
     input: "genotype_pcs/AFR_EUR.chr{chr}_GRCh38.vcf.gz"
     output: "genotype_pcs/snps_chr{chr}.txt"
     shell: "zcat {input} | grep -v '#' | cut -f 1,2 > {output}"
 
 # Here, we select from the SNPs called for the egyptians those, which are also
 # kept from the 1000 genomes samples, i.e. 5% MAF, HWE, bi-allelic
-rule select_matching_egyptian_snps:
+rule gp_select_matching_egyptian_snps:
     input: "variants_GRCh38/egyptians.chromosome.{chr}.vcf.gz",
            "genotype_pcs/snps_chr{chr}.txt"
     output: "genotype_pcs/egyptians.chromosome.{chr}.vcf.gz"
     params: log_base=lambda wildcards, output: output[0][:-7]
+    conda: "envs/genotype_pcs.yaml"
     shell: "vcftools --gzvcf {input[0]} " + \
                     "--positions {input[1]} " + \
                     "--recode-INFO-all " + \
@@ -1376,51 +1415,119 @@ rule select_matching_egyptian_snps:
                     "--stdout | bgzip > {output[0]}"
 
 # Compressing and indexing of files to be used with vcf-merge
-rule index_egyptians:
+rule gp_index_egyptians:
     input: "genotype_pcs/egyptians.chromosome.{chr}.vcf.gz"
     output: "genotype_pcs/egyptians.chromosome.{chr}.vcf.gz.tbi"
+    conda: "envs/genotype_pcs.yaml"
     shell: "tabix -p vcf {input}"
 
 # Merging the vcf-files of 1000 genomes with our SNP calls for the egyptians
-rule merge_1000g_with_egyptians:
+rule gp_merge_1000g_with_egyptians:
     input: "genotype_pcs/egyptians.chromosome.{chr}.vcf.gz",
            "genotype_pcs/egyptians.chromosome.{chr}.vcf.gz.tbi",
            "genotype_pcs/AFR_EUR.chr{chr}_GRCh38.vcf.gz",
            "genotype_pcs/AFR_EUR.chr{chr}_GRCh38.vcf.gz.tbi"
     output: "genotype_pcs/EGYPT_AFR_EUR.chr{chr}_GRCh38.vcf.gz"
+    conda: "envs/genotype_pcs.yaml"
     shell: "vcf-merge {input[0]} {input[2]} | bgzip > {output[0]}"
 
-rule merge_1000g_with_egyptians_all:
+rule gp_merge_1000g_with_egyptians_all:
     input: expand("genotype_pcs/EGYPT_AFR_EUR.chr{chr}_GRCh38.vcf.gz", \
                    chr=[str(x) for x in range(1,23)]+["X","Y"])
 
-# Removal of regions of high LD and/or known inversions from Abraham 2014, i.e. Fellay 2009:
+# Concatenate the vcf file from several chromosomes
+# --pad-missing: Write '.' in place of missing columns. Useful for joining chrY 
+# with the rest.
+rule gp_concatenate_chr_vcfs:
+    input: expand("genotype_pcs/EGYPT_AFR_EUR.chr{chr}_GRCh38.vcf.gz", \
+                   chr=[str(x) for x in range(1,23)]+["X","Y"])
+    output: "genotype_pcs/EGYPT_AFR_EUR_GRCh38.vcf.gz"
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcf-concat --pad-missing {input} | bgzip > {output}"
+
+# Converting vcf files to plink binary format (bed/bim/fam) for preparing for
+# Eigenstrat analysis
+rule gp_vcf_to_plink:
+    input: "genotype_pcs/EGYPT_AFR_EUR_GRCh38.vcf.gz"
+    output: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38.bed",
+            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38.bim",
+            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38.fam"
+    params: out_base=lambda wildcards, output: output[0][:-4]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "plink2 --vcf {input} " + \
+                  "--make-bed " + \
+                  "--out {params.out_base}"
+
+# Removal of regions of high LD and/or known inversions from Abraham 2014, 
+# i.e. Fellay 2009:
 # chr6:25 Mb–33.5 Mb, (see also Wang 2009)
 # chr5:44 Mb–51.5 Mb, chr8:8 Mb–12 Mb, chr11:45 Mb–57 Mb
-rule find_snps_from_high_ld_regions:
-   input: "{analysis}/plink/{filename}_filtered.ped", "{analysis}/plink/{filename}_filtered.map"
-   output: "{analysis}/plink/{filename}_6_25-33.5.snplist",
-           "{analysis}/plink/{filename}_5_44-51.5.snplist",
-           "{analysis}/plink/{filename}_8_8-12.snplist",
-           "{analysis}/plink/{filename}_11_45-57.snplist",
-           "{analysis}/plink/{filename}_exclusion.snplist" 
-   run: 
-      # Make lists of SNPs in the respective regions to be removed
-      shell("p-link --ped {input[0]} --map {input[1]} --allow-no-sex --chr 6 --from-mb 25 --to-mb 33.5 --write-snplist --out {wildcards.analysis}/plink/{wildcards.filename}_6_25-33.5")
-      shell("p-link --ped {input[0]} --map {input[1]} --allow-no-sex --chr 5 --from-mb 44 --to-mb 51.5 --write-snplist --out {wildcards.analysis}/plink/{wildcards.filename}_5_44-51.5")
-      shell("p-link --ped {input[0]} --map {input[1]} --allow-no-sex --chr 8 --from-mb 8 --to-mb 12 --write-snplist --out {wildcards.analysis}/plink/{wildcards.filename}_8_8-12")
-      shell("p-link --ped {input[0]} --map {input[1]} --allow-no-sex --chr 11 --from-mb 45 --to-mb 57 --write-snplist --out {wildcards.analysis}/plink/{wildcards.filename}_11_45-57")
-      # Concatenate all the SNPs to be removed
-      shell("cat {output[0]} {output[1]} {output[2]} {output[3]}  > {output[4]}")
+# Therefore, make lists of SNPs in the respective regions to be removed,
+# Then: Concatenate all the SNPs to be removed
+# --allow-no-sex: needed?
+rule gp_find_snps_from_high_ld_regions:
+    input: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38.bed", 
+           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38.bim",
+           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38.fam"
+    output: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_6_25-33.5.snplist",
+            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_5_44-51.5.snplist",
+            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_8_8-12.snplist",
+            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_11_45-57.snplist",
+            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_exclusion.snplist" 
+    params: in_base = lambda wildcards, input: input[0][:-4],
+            chr6_base = lambda wildcards, output: output[0][:-8],
+            chr5_base = lambda wildcards, output: output[1][:-8],
+            chr8_base = lambda wildcards, output: output[2][:-8],
+            chr11_base = lambda wildcards, output: output[3][:-8]
+    conda: "envs/genotype_pcs.yaml"
+    shell: 
+        "plink2 --bfile {params.in_base} " + \ 
+               "--chr 6 " + \
+               "--from-mb 25 " + \
+               "--to-mb 33.5 " + \
+               "--write-snplist " + \
+               "--out {params.chr6_base}; " + \
+        "plink2 --bfile {params.in_base} " + \ 
+               "--chr 5 " + \
+               "--from-mb 44 " + \
+               "--to-mb 51.5 " + \
+               "--write-snplist " + \
+               "--out {params.chr5_base}; " + \
+        "plink2 --bfile {params.in_base} " + \ 
+               "--chr 8 " + \
+               "--from-mb 8 " + \
+               "--to-mb 12 " + \
+               "--write-snplist " + \
+               "--out {params.chr8_base}; " + \
+        "plink2 --bfile {params.in_base} " + \ 
+               "--chr 11 " + \
+               "--from-mb 45 " + \
+               "--to-mb 57 " + \
+               "--write-snplist " + \
+               "--out {params.chr11_base}; " + \
+        "cat {output[0]} {output[1]} {output[2]} {output[3]}  > {output[4]} "
 
-rule exclude_snps_from_high_ld_regions:
-   input: "{analysis}/plink/{filename}_filtered.ped", "{analysis}/plink/{filename}_filtered.map", "{analysis}/plink/{filename}_exclusion.snplist"
-   output: "{analysis}/plink/{filename}_wo_ldregions.ped", "{analysis}/plink/{filename}_wo_ldregions.map"
-   shell: "p-link --ped {input[0]} --map {input[1]} --exclude {input[2]} --recode --out {wildcards.analysis}/plink/{wildcards.filename}_wo_ldregions"
+# Now exclude the SNPs from these regions
+rule gp_exclude_snps_from_high_ld_regions:
+    input: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38.bed", 
+           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38.bim",
+           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38.fam",
+           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_exclusion.snplist"
+    output: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.bed", 
+            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.bim",
+            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.fam"
+    params: in_base = lambda wildcards, input: input[0][:-4],
+            out_base = lambda wildcards, output: output[0][:-4]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "plink2 --bfile {params.in_base} " + \
+                  "--exclude {input[3]} " + \
+                  "--make-bed " + \
+                  "--out {params.out_base} "
 
-# LD prune the PLINK ped/map files; therefore, first make a list of SNPs in LD (and not in LD)
-# (i.e. to be removed or not)
-# Parameters for indep-pairwise: [window size]<kb> [step size (variant ct)] [VIF threshold]
+# LD prune the PLINK files; therefore, first make a list of SNPs in LD (and not 
+# in LD)(i.e. to be removed or not)
+# Parameters for indep-pairwise: [window size]<kb> [step size (variant ct)] 
+# [VIF threshold]
 # Explanation Plink website): the command above that specifies 50 5 0.5 would 
 # a) consider a window of 50 SNPs, 
 # b) calculate LD between each pair of SNPs in the window, 
@@ -1430,48 +1537,93 @@ rule exclude_snps_from_high_ld_regions:
 # Anderson 2010 used: 50 5 0.2
 # Wang 2009 used: 100 ? 0.2
 # Fellay 2009 used: 1500 150 0.2 
-rule find_ld_pruned_snps:
-   input: "{analysis}/plink/{filename}_wo_ldregions.ped", "{analysis}/plink/{filename}_wo_ldregions.map"
-   output: "{analysis}/plink/{filename}_plink.prune.in","{analysis}/plink/{filename}_plink.prune.out"
-   run:
-      shell("p-link --ped {input[0]} --map {input[1]} --allow-no-sex --indep-pairwise 1000 10 0.2 --out {wildcards.analysis}/plink/{wildcards.filename}_plink")
+# --allow-no-sex needed?
+rule gp_find_ld_pruned_snps:
+    input: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.bed", 
+           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.bim",
+           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.fam"
+    output: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.prune.in", 
+            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.prune.out"
+    params: in_base = lambda wildcards, input: input[0][:-4]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "plink2 --bfile {params.in_base} " + \
+                  "--indep-pairwise 1000 10 0.2 " + \
+                  "--out {params.in_base} "
 
-rule exclude_ld_pruned_snps:
-   input: "{analysis}/plink/{filename}_wo_ldregions.ped", "{analysis}/plink/{filename}_wo_ldregions.map", "{analysis}/plink/{filename}_plink.prune.out"
-   output: "{analysis}/plink/{filename}_wo_ldregions_pruned.ped", "{analysis}/plink/{filename}_wo_ldregions_pruned.map"
-   shell: "p-link --ped {input[0]} --map {input[1]} --allow-no-sex --exclude {input[2]} --out {wildcards.analysis}/plink/{wildcards.filename}_wo_ldregions_pruned --recode"
+# Now exclude the pruned SNPs
+# --allow-no-sex needed?
+rule gp_exclude_ld_pruned_snps:
+    input: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.bed", 
+            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.bim",
+            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.fam",
+            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.prune.out"
+    output: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.bed", 
+            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.bim",
+            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.fam"
+    params: in_base = lambda wildcards, input: input[0][:-4],
+            out_base = lambda wildcards, output: output[0][:-4]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "plink2 --bfile {params.in_base} " + \
+                  "--exclude {input[3]} " + \
+                  "--make-bed " + \
+                  "--out {params.out_base}"
 
 # Conversion using Eigensoft's convertf ignores all samples if in column 6 is a zero; therefore
 # replace column 6's zero
-rule change_ped_file_column6:
-   input: "{analysis}/plink/{filename}_wo_ldregions_pruned.ped","{analysis}/plink/{filename}_wo_ldregions_pruned.map"
-   output: "{analysis}/plink/{filename}_for_pca_computation.ped","{analysis}/plink/{filename}_for_pca_computation.map"
-   run: 
-      with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
-         for line in f_in:
-            splitted_line = line.split()
-            sample = splitted_line[1]
-            f_out.write("\t".join(splitted_line[:5])+"\t"+str(1)+"\t"+"\t".join(splitted_line[6:])+"\n")
-      shell("cp {input[1]} {output[1]}")
+# Needed???
+#rule change_ped_file_column6:
+#   input: "{analysis}/plink/{filename}_wo_ldregions_pruned.ped","{analysis}/plink/{filename}_wo_ldregions_pruned.map"
+#   output: "{analysis}/plink/{filename}_for_pca_computation.ped","{analysis}/plink/{filename}_for_pca_computation.map"
+#   run: 
+#      with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+#         for line in f_in:
+#            splitted_line = line.split()
+#            sample = splitted_line[1]
+#            f_out.write("\t".join(splitted_line[:5])+"\t"+str(1)+"\t"+"\t".join(splitted_line[6:])+"\n")
+#      shell("cp {input[1]} {output[1]}")
+
+# Conversion from bed/bim/fam to ped/map
+rule gp_convert_to_ped_map:
+    input: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.bed", 
+           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.bim",
+           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.fam"
+    output: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.ped", 
+            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.map"
+    params: in_base = lambda wildcards, input: input[0][:-4]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "plink2 --bfile {params.in_base} " + \
+                  "--recode " + \
+                  "--out {params.in_base} "
+
+# Write the parameter file needed by the Eigensoft convertf program
+rule gp_eigentstrat_parameter_file:
+    input: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.ped", 
+           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.map"
+    output: "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.ped2eigenstrat.params",
+    params: gout="genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.eigenstratgeno",
+            sout="genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.snp",
+            iout="genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.ind"
+    run: 
+        with open(output[0],"w") as f_out:
+            f_out.write("genotypename:    "+input[0]+"\n")
+            f_out.write("snpname:         "+input[1]+"\n") 
+            f_out.write("indivname:       "+input[0]+"\n")
+            f_out.write("outputformat:    EIGENSTRAT\n")
+            f_out.write("genotypeoutname: "+params.gout+"\n")
+            f_out.write("snpoutname:      "+params.sout+"\n")
+            f_out.write("indivoutname:    "+params.iout+"\n")
+            f_out.write("familynames:     NO\n")
 
 # This is the actual conversion from ped format to the eigenstrat input format
-rule ped_to_eigentstrat:
-   input: "{analysis}/plink/{filename}_for_pca_computation.ped","{analysis}/plink/{filename}_for_pca_computation.map"
-   output: "{analysis}/eigenstrat/{filename}.ped2eigenstrat.params","{analysis}/eigenstrat/{filename}.eigenstratgeno",
-           "{analysis}/eigenstrat/{filename}.snp","{analysis}/eigenstrat/{filename}.ind"
-   run: 
-      # Write the parameter file needed by the Eigensoft convertf program
-      with open(output[0],"w") as f_out:
-         f_out.write("genotypename:    "+input[0]+"\n")
-         f_out.write("snpname:         "+input[1]+"\n") 
-         f_out.write("indivname:       "+input[0]+"\n")
-         f_out.write("outputformat:    EIGENSTRAT\n")
-         f_out.write("genotypeoutname: "+output[1]+"\n")
-         f_out.write("snpoutname:      "+output[2]+"\n")
-         f_out.write("indivoutname:    "+output[3]+"\n")
-         f_out.write("familynames:     NO\n")
-      shell("convertf -p {output[0]}")
-
+rule gp_ped_to_eigentstrat:
+    input: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.ped", 
+           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.map",
+           "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.ped2eigenstrat.params"
+    output: "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.eigenstratgeno",
+            "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.snp",
+            "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.ind"
+    conda: "envs/genotype_pcs.yaml"
+    shell: "convertf -p {input[2]}"
 
 # Running Eigensofts smartpca module which computes the population PCs
 # The smartpca parameters:
@@ -1492,29 +1644,49 @@ rule ped_to_eigentstrat:
 # -s sigma         : (Default is 6.0) number of standard deviations which an
 #                    individual must exceed, along one of topk top principal
 # 		               components, in order to be removed as an outlier.
-rule eigensoft_smartpca:
-   input: "{analysis}/eigenstrat/{filename}.eigenstratgeno","{analysis}/eigenstrat/{filename}.snp",
-          "{analysis}/eigenstrat/{filename}.ind"
-   output: "{analysis}/eigenstrat/{filename}.pca","{analysis}/eigenstrat/{filename}.plot.pdf",
-           "{analysis}/eigenstrat/{filename}.eval","{analysis}/eigenstrat/{filename}.log",
-           "{analysis}/eigenstrat/{filename}.pca.evec"
-   run:
-      shell("smartpca.perl -i {input[0]} -a {input[1]} -b {input[2]} -o {output[0]} -p {wildcards.analysis}/eigenstrat/{wildcards.filename}.plot -e {output[2]} -l {output[3]} -m 0")
-      shell("mv {wildcards.filename}.plot.pdf {wildcards.analysis}/eigenstrat/.")
-
+rule gp_eigensoft_smartpca:
+    input: "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.eigenstratgeno",
+           "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.snp",
+           "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.ind"
+    output: "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.pca",
+            "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.plot.pdf",
+            "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.eval",
+            "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.log",
+            "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.pca.evec"
+    params: out_base = lambda wildcards, output: output[0][:-4]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "smartpca.perl -i {input[0]} " + \
+                         "-a {input[1]} " + \
+                         "-b {input[2]} " + \
+                         "-o {output[0]} " + \
+                         "-p {params.out_base}.plot " + \
+                         "-e {output[2]} " + \
+                         "-l {output[3]} " + \
+                         "-m 0; " + \
+           "mv EGYPT_AFR_EUR_GRCh38.plot.pdf genotype_pcs/eigenstrat/."
 
 # Computing the Tracy-Widom statistics to evaluate the statistical 
 # significance of each principal component identified by pca
-rule tracy_widom_pval:
-   input: "{analysis}/eigenstrat/{filename}.eval","annotation/twtable"
-   output: "{analysis}/eigenstrat/{filename}.tw"
-   shell: "twstats -i {input[0]} -t {input[1]} -o {output[0]}"
+rule gp_tracy_widom_pval:
+    input: "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.eval",
+           "data/misc/twtable"
+    output: "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.tw"
+    conda: "envs/genotype_pcs.yaml"
+    shell: "twstats -i {input[0]} " + \
+                   "-t {input[1]} " + \
+                   "-o {output[0]} "
 
 # Plotting the PCs
-rule plot_gt_pcs:
-   input: "{analysis}/eigenstrat/{filename}.pca.evec", "annotation/annotation_{analysis}.txt"
-   output: "{analysis}/figures/{filename}_pca_1vs2.pdf", "{analysis}/figures/{filename}_pca_1vs3.pdf",
-           "{analysis}/figures/{filename}_pca_1vs4.pdf", "{analysis}/figures/{filename}_pca_2vs3.pdf", 
-           "{analysis}/figures/{filename}_pca_2vs4.pdf", "{analysis}/figures/{filename}_pca_3vs4.pdf",
-           "{analysis}/figures/{filename}_scree_plot.pdf"
-   shell: "Rscript scripts/plot_gt_pcs.r {input[0]} {wildcards.analysis}/figures/{wildcards.filename} {input[1]}"
+rule gp_plot_gt_pcs:
+    input: "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.pca.evec",
+           "genotype_pcs/annotation_EGYPT_AFR_EUR_GRCh38.txt"
+    output: "genotype_pcs/figures/EGYPT_AFR_EUR_GRCh38_pca_1vs2.pdf",
+            "genotype_pcs/figures/EGYPT_AFR_EUR_GRCh38_pca_1vs3.pdf",
+            "genotype_pcs/figures/EGYPT_AFR_EUR_GRCh38_pca_1vs4.pdf",
+            "genotype_pcs/figures/EGYPT_AFR_EUR_GRCh38_pca_2vs3.pdf",
+            "genotype_pcs/figures/EGYPT_AFR_EUR_GRCh38_pca_2vs4.pdf",
+            "genotype_pcs/figures/EGYPT_AFR_EUR_GRCh38_pca_3vs4.pdf",
+            "genotype_pcs/figures/EGYPT_AFR_EUR_GRCh38_scree_plot.pdf"
+    params: out_path = "genotype_pcs/figures/"
+    conda: "envs/genotype_pcs.yaml"
+    script: "scripts/plot_gt_pcs.R"
