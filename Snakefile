@@ -1142,20 +1142,6 @@ rule vc_snp_calling_with_gatk_hc_all:
     input: expand("variants_GRCh38/{sample}.vcf", sample=EGYPT_SAMPLES),
            expand("variants_GRCh38/{sample}.stats.txt", sample=EGYPT_SAMPLES)
 
-
-# Extracting variants within a certain genes (and near to it)
-
-# Therefore, obtain a recent Ensemble annotation file first
-rule get_ensembl_gene_annotation_gtf:
-    output: temp("annotations/Homo_sapiens.GRCh38.94.gtf.gz")
-    shell: "wget -P annotations " + \
-           "ftp://ftp.ensembl.org/pub/release-94/gtf/homo_sapiens/Homo_sapiens.GRCh38.94.gtf.gz "
-
-rule unzip_ensembl_gene_annotation_gtf:
-    input: "annotations/Homo_sapiens.GRCh38.94.gtf.gz"
-    output: "annotations/Homo_sapiens.GRCh38.94.gtf"
-    shell: "gzip -d {input}"
-
 # Extracting unmapped reads of the reference Egyptian for Axel, who wants to
 # run SOAP-denovo to compute a de-novo short-read assembly based on them
 rule get_unmapped_reads:
@@ -1464,7 +1450,6 @@ rule gp_vcf_to_plink:
 # chr5:44 Mb–51.5 Mb, chr8:8 Mb–12 Mb, chr11:45 Mb–57 Mb
 # Therefore, make lists of SNPs in the respective regions to be removed,
 # Then: Concatenate all the SNPs to be removed
-# --allow-no-sex: needed?
 rule gp_find_snps_from_high_ld_regions:
     input: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38.bed", 
            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38.bim",
@@ -1537,7 +1522,6 @@ rule gp_exclude_snps_from_high_ld_regions:
 # Anderson 2010 used: 50 5 0.2
 # Wang 2009 used: 100 ? 0.2
 # Fellay 2009 used: 1500 150 0.2 
-# --allow-no-sex needed?
 rule gp_find_ld_pruned_snps:
     input: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.bed", 
            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.bim",
@@ -1551,7 +1535,6 @@ rule gp_find_ld_pruned_snps:
                   "--out {params.in_base} "
 
 # Now exclude the pruned SNPs
-# --allow-no-sex needed?
 rule gp_exclude_ld_pruned_snps:
     input: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.bed", 
             "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.bim",
@@ -1567,20 +1550,6 @@ rule gp_exclude_ld_pruned_snps:
                   "--exclude {input[3]} " + \
                   "--make-bed " + \
                   "--out {params.out_base}"
-
-# Conversion using Eigensoft's convertf ignores all samples if in column 6 is a zero; therefore
-# replace column 6's zero
-# Needed???
-#rule change_ped_file_column6:
-#   input: "{analysis}/plink/{filename}_wo_ldregions_pruned.ped","{analysis}/plink/{filename}_wo_ldregions_pruned.map"
-#   output: "{analysis}/plink/{filename}_for_pca_computation.ped","{analysis}/plink/{filename}_for_pca_computation.map"
-#   run: 
-#      with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
-#         for line in f_in:
-#            splitted_line = line.split()
-#            sample = splitted_line[1]
-#            f_out.write("\t".join(splitted_line[:5])+"\t"+str(1)+"\t"+"\t".join(splitted_line[6:])+"\n")
-#      shell("cp {input[1]} {output[1]}")
 
 # Conversion from bed/bim/fam to ped/map
 rule gp_convert_to_ped_map:
@@ -1690,3 +1659,138 @@ rule gp_plot_gt_pcs:
     params: out_path = "genotype_pcs/figures/"
     conda: "envs/genotype_pcs.yaml"
     script: "scripts/plot_gt_pcs.R"
+
+
+################################################################################
+##### Computing depth for Novogene file of GRCh38 reads unmapped to assembly ###
+################################################################################
+
+# Symlink file
+rule ng_symlink_unmapped_reads:
+    output: "novogene/all.new1.bam"
+    shell: "ln -s /data/lied_egypt_genome/raw/" + \
+           "P101HW18010820-01_human_2018.10.11_align/all.new1.bam " + \
+           "{output}"
+
+# Sort the reads by coordinate, needed for computing coverage
+rule ng_sort_bam:
+    input: "novogene/all.new1.bam"
+    output: "novogene/all.new1.sorted.bam"
+    shell: "samtools sort --threads 24 " + \
+                         "--output-fmt BAM " + \
+                         "{input} > {output}"
+
+# Getting coverage
+rule ng_coverage:
+    input: "novogene/all.new1.sorted.bam"
+    output: "novogene/coverage.txt"
+    shell: "samtools depth {input} > {output}"
+
+rule ng_occ_vs_dp:
+    input: "novogene/coverage.txt"
+    output: "novogene/coverage_occurrence_vs_depth.txt"
+    shell: "cat {input} | cut -f 3 | sort | uniq -c > {output}"
+
+rule ng_get_bases_not_in_assembly:
+    input: "novogene/coverage_occurrence_vs_depth.txt"
+    output: "novogene/uncovered_bases.txt"
+    run:
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            sum = 0
+            for line in f_in:
+                s = line.strip(" ").split(" ")
+                if s[1] == "0":
+                    continue
+                sum += int(s[0])
+            f_out.write("UNCOVERED BASES: "+str(sum)+"\n")
+
+rule ng_plot_uncovered_bases_distribution:
+    input: "novogene/coverage_occurrence_vs_depth.txt"
+    output: "novogene/dist_uncovered_dp.pdf"
+    script: "scripts/dist_uncovered_dp.R"
+
+
+################################################################################
+## Extracting various information within specified genes (i.e. gene-centric) ###
+################################################################################
+
+# These are the genes of interest (ABCC7=CFTR, HD=HDDC3?, Factor V=F5)
+GENES = ["BRCA1","CFTR","HDDC3","DMD","BRCA1","BRCA2","TP53","EGFR","APP","PSEN1","F5","CARD11"]
+
+# Therefore, obtain a recent Ensembl annotation file first
+rule get_ensembl_gene_annotation_gtf:
+    output: temp("annotations/Homo_sapiens.GRCh38.94.gtf.gz")
+    shell: "wget -P annotations " + \
+           "ftp://ftp.ensembl.org/pub/release-94/gtf/homo_sapiens/" + \
+           "Homo_sapiens.GRCh38.94.gtf.gz "
+
+rule unzip_ensembl_gene_annotation_gtf:
+    input: "annotations/Homo_sapiens.GRCh38.94.gtf.gz"
+    output: "annotations/Homo_sapiens.GRCh38.94.gtf"
+    shell: "gzip -d {input}"
+
+rule gc_get_gene_annotation:
+    input: "annotations/Homo_sapiens.GRCh38.94.gtf"
+    output: "gene_centric/{gene}/{gene}.gtf"
+    shell: "cat {input} | grep '#' > {output}; " + \
+           "cat {input} | grep 'gene_name \"{wildcards.gene}\";' >> {output}"
+
+# How many bases left and right of gene boundaries to consider 
+WINDOW = {
+    "BRCA1": [100000,100000]
+}
+rule gc_get_start_end_position:
+    input: "gene_centric/{gene}/{gene}.gtf"
+    output: "gene_centric/{gene}/{gene}.bed"
+    run:
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                if line[0] == '#':
+                    continue
+                s = line.split("\t")
+                if s[2] == "gene":
+                    chr = s[0]
+                    start = str(int(s[3]) - WINDOW[wildcards.gene][0])
+                    end = str(int(s[4]) + WINDOW[wildcards.gene][1])
+                    strand = s[6]
+                    f_out.write("\t".join([chr,start,end,'.','.',strand])+"\n")
+
+rule gc_get_overlapping_genes:
+    input: "annotations/Homo_sapiens.GRCh38.94.gtf",
+           "gene_centric/{gene}/{gene}.bed"
+    output: "gene_centric/{gene}/{gene}_overlapping.gtf"
+    run:
+        with open(input[1],"r") as f_in:
+            for line in f_in:
+                s = line.split("\t")
+                [q_chrom,q_start,q_end] = s[:3]
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+                for line in f_in:
+                    if line[0] == '#':
+                        continue
+                    s = line.split("\t")
+                    chrom,start,end = s[:3]
+                    if chrom == q_chrom:
+                        if q_start<start<q_end or q_start<end<q_end:
+                            f_out.write(line)
+
+# Selecting the Illumina reads of the Egyptians mapped to this gene 
+# -b: output bam
+# -L FILE: only include reads overlapping this BED FILE
+rule gc_get_mapped_egyptref_reads:
+    input: bam="variants_GRCh38/{sample}.final.bam",
+           bed="gene_centric/{gene}/{gene}.bed"
+    output: "gene_centric/{gene}/{sample}.{gene}.bam",
+            "gene_centric/{gene}/{sample}.{gene}.bam.bai",
+    shell: "samtools view -b -L {input.bed} {input.bam} > {output}; " + \
+           "samtools index {output[0]} "
+
+rule gc_get_mapped_egyptref_reads_all:
+    input: expand("gene_centric/{gene}/{sample}.{gene}.bam", \
+                   sample=EGYPT_SAMPLES, \
+                   gene=GENES)
+
+
+    
+
+           
