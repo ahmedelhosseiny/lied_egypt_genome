@@ -1737,7 +1737,17 @@ rule gc_get_gene_annotation:
 
 # How many bases left and right of gene boundaries to consider 
 WINDOW = {
-    "BRCA1": [100000,100000]
+    "CFTR": [100000,100000],
+    "HDDC3": [100000,100000],
+    "DMD": [100000,100000],
+    "BRCA1": [100000,100000],
+    "BRCA2": [100000,100000],
+    "TP53": [100000,100000],
+    "EGFR": [100000,100000],
+    "APP": [100000,100000],
+    "PSEN": [100000,100000],
+    "F5": [100000,100000],
+    "CARD11": [100000,100000]
 }
 rule gc_get_start_end_position:
     input: "gene_centric/{gene}/{gene}.gtf"
@@ -1782,15 +1792,11 @@ rule gc_get_mapped_egyptref_reads:
            bed="gene_centric/{gene}/{gene}.bed"
     output: "gene_centric/{gene}/{sample}.{gene}.bam",
             "gene_centric/{gene}/{sample}.{gene}.bam.bai",
-    shell: "samtools view -b -L {input.bed} {input.bam} > {output}; " + \
+    shell: "samtools view -b -L {input.bed} {input.bam} > {output[0]}; " + \
            "samtools index {output[0]} "
 
 rule gc_get_mapped_egyptref_reads_all:
     input: expand("gene_centric/{gene}/{sample}.{gene}.bam", \
                    sample=EGYPT_SAMPLES, \
-                   gene=GENES)
-
-
-    
-
-           
+                   gene=GENES),
+          expand("gene_centric/{gene}/{gene}_overlapping.gtf", gene=GENES)
