@@ -831,14 +831,18 @@ rule get_index_of_known_snps_from_dbsnp:
     shell: "wget -P dbsnp_GRCh38 " + \
            "ftp://ftp.ncbi.nlm.nih.gov/snp/organisms/human_9606/VCF/GATK/All_20180418.vcf.gz.tbi"
 
-rule unzip_dbsnp:
+# Replacing trailing "chr" and then zipping...
+rule unzip_and_reformat_dbsnp:
     input: "dbsnp_GRCh38/All_20180418.vcf.gz"
-    output: "dbsnp_GRCh38/All_20180418.vcf"
-    shell: "zcat {input} > {output}"
+    output: "dbsnp_GRCh38/dbsnp.vcf.gz"
+    shell: "zcat {input} | " + \
+           "awk '{{gsub(/^chr/,\"\"); print}}' | " + \
+           "bgzip > {output}"
 
+# ... and indexing again
 rule tabix_dbsnp:
-    input: "dbsnp_GRCh38/All_20180418.vcf"
-    output: "dbsnp_GRCh38/All_20180418.vcf.tbi"
+    input: "dbsnp_GRCh38/dbsnp.vcf.gz"
+    output: "dbsnp_GRCh38/dbsnp.vcf.gz.tbi"
     shell: "tabix -p vcf {input}"
 
 ### 1. map reads to genome
@@ -1106,9 +1110,9 @@ rule vc_split_gatk_hc_chromosomewise_all:
 
 # --intervals / -L: One or more genomic intervals over which to operate
 rule vc_joint_genotyping:
-    input: vcfs=expand("variants_{{assembly}}/{sample}.chromosome.{{chr}}.vcf", sample=[x for x in EGYPT_SAMPLES if not x in ["EGYPTREF","TEST"]]),
+    input: vcfs=expand("variants_{{assembly}}/{sample}.chromosome.{{chr}}.vcf", sample=[x for x in EGYPT_SAMPLES if not x in s"TEST"]]),
            ref="seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
-           dbsnp="dbsnp_{assembly}/All_20180418.vcf"
+           dbsnp="dbsnp_{assembly}/dbsnp.vcf.gz"
     output: "variants_{assembly}/egyptians.chromosome.{chr}.vcf"
     conda: "envs/variant_calling.yaml"
     params: variant_files=lambda wildcards, input: " --variant " + \
@@ -1135,6 +1139,13 @@ rule vc_compress_vcf:
 rule vc_joint_genotyping_all:
     input: expand("variants_{assembly}/egyptians.{chr}.vcf.gz", \
                   assembly=["GRCh38"],chr=CHR_GRCh38)
+
+# Combining the chromosome-wise vcfs
+rule vc_combine_chromosomewise_vcf:
+    input: expand("variants_{{assembly}}/egyptians.{chr}.vcf.gz", chr=CHR_GRCh38)
+    output: "variants_{assembly}/egyptians.vcf.gz"
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcf-concat --pad-missing {input} | bgzip > {output}"
 
 # Doing the variant calling for all 10 samples
 # and collecting alignment summary stats
@@ -1715,7 +1726,7 @@ rule ng_plot_uncovered_bases_distribution:
 ################################################################################
 
 # These are the genes of interest (ABCC7=CFTR, HD=HDDC3?, Factor V=F5)
-GENES = ["BRCA1","CFTR","HDDC3","DMD","BRCA1","BRCA2","TP53","EGFR","APP","PSEN1","F5","CARD11"]
+GENES = ["CFTR","HDDC3","DMD","BRCA1","BRCA2","TP53","EGFR","APP","PSEN1","F5","CARD11"]
 
 # Therefore, obtain a recent Ensembl annotation file first
 rule get_ensembl_gene_annotation_gtf:
@@ -1745,7 +1756,7 @@ WINDOW = {
     "TP53": [100000,100000],
     "EGFR": [100000,100000],
     "APP": [100000,100000],
-    "PSEN": [100000,100000],
+    "PSEN1": [100000,100000],
     "F5": [100000,100000],
     "CARD11": [100000,100000]
 }
@@ -1754,8 +1765,9 @@ rule gc_get_start_end_position:
     output: "gene_centric/{gene}/{gene}.bed"
     run:
         with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            f_out.write("# Custom bed file for region around gene\n")
             for line in f_in:
-                if line[0] == '#':
+                if line[0] == "#":
                     continue
                 s = line.split("\t")
                 if s[2] == "gene":
@@ -1772,11 +1784,13 @@ rule gc_get_overlapping_genes:
     run:
         with open(input[1],"r") as f_in:
             for line in f_in:
-                s = line.split("\t")
+                if line[0] == "#":
+                    continue
+                s = line.split('\t')
                 [q_chrom,q_start,q_end] = s[:3]
         with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
                 for line in f_in:
-                    if line[0] == '#':
+                    if line[0] == "#":
                         continue
                     s = line.split("\t")
                     chrom,start,end = s[:3]
@@ -1800,3 +1814,56 @@ rule gc_get_mapped_egyptref_reads_all:
                    sample=EGYPT_SAMPLES, \
                    gene=GENES),
           expand("gene_centric/{gene}/{gene}_overlapping.gtf", gene=GENES)
+
+# Get the SNP calls of the Egyptians for the specified genes
+rule gc_get_variants:
+    input: vcf="variants_GRCh38/egyptians.vcf.gz",
+           bed="gene_centric/{gene}/{gene}.bed"
+    output: "gene_centric/{gene}/{gene}_egyptians.vcf.gz"
+    shell: "vcftools --gzvcf {input.vcf} " + \
+                    "--bed {input.bed} " + \
+                    "--recode " + \
+                    "--recode-INFO-all " + \
+                    "--stdout " + \
+                    "| bgzip > {output}"
+
+rule gc_get_dbsnp_variants:
+    input: vcf="dbsnp_GRCh38/dbsnp.vcf.gz",
+           bed="gene_centric/{gene}/{gene}.bed"
+    output: "gene_centric/{gene}/{gene}_dbsnp.vcf.gz"
+    shell: "vcftools --gzvcf {input.vcf} " + \
+                    "--bed {input.bed} " + \
+                    "--recode " + \
+                    "--recode-INFO-all " + \
+                    "--stdout " + \
+                    "| bgzip > {output}"
+
+# Combining the chromosome-wise vcfs and removing trailing "chr"
+rule gc_combine_chromosomewise_1000g_vcf:
+    input: expand("1000_genomes/ALL.chr{chr}_GRCh38.genotypes.20170504.vcf.gz", \
+                   chr=[str(x) for x in range(1,23)]+["X","Y"])
+    output: "1000_genomes/ALL.GRCh38.genotypes.20170504.vcf.gz"
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcf-concat --pad-missing {input} | bgzip > {output}"
+
+# needed?
+#rule index_1000g_vcf:
+#    input: "1000_genomes/ALL.GRCh38.genotypes.20170504.vcf.gz"
+#    output: "1000_genomes/ALL.GRCh38.genotypes.20170504.vcf.gz.tbi"
+#    shell: "tabix -p vcf {input}"
+
+rule gc_get_1000g_variants:
+    input: vcf="1000_genomes/ALL.GRCh38.genotypes.20170504.vcf.gz",
+           bed="gene_centric/{gene}/{gene}.bed"
+    output: "gene_centric/{gene}/{gene}_1000g.vcf.gz"
+    shell: "vcftools --gzvcf {input.vcf} " + \
+                    "--bed {input.bed} " + \
+                    "--recode " + \
+                    "--recode-INFO-all " + \
+                    "--stdout " + \
+                    "| bgzip > {output}"
+
+rule gc_get_variants_all:
+    input: #expand("gene_centric/{gene}/{gene}_egyptians.vcf.gz",gene=GENES),
+           expand("gene_centric/{gene}/{gene}_dbsnp.vcf.gz",gene=GENES),
+           expand("gene_centric/{gene}/{gene}_1000g.vcf.gz",gene=GENES)
