@@ -785,7 +785,7 @@ rule run_fastqc_all:
 # EGYPTREF and I symlinked the individual fastq files and used a naming 
 # convention that follows the same pattern than that for the 9 Egyptian samples
 EGYPT_SAMPLES = ["EGYPTREF","LU18","LU19","LU2","LU22","LU23","LU9","PD114", \
-                 "PD115","PD82","TEST"]
+                 "PD115","PD82"] #,"TEST"
 
 # These are additional IDs after the sample IDs, given by Novogene, e.g 
 # H75TCDMXX is the ID of the sequencer, L1 is the first lane
@@ -807,8 +807,8 @@ EGYPT_SAMPLES_TO_PREPLANES = {
     "LU9":      ["NDHG02362_H772LDMXX_L1", "NDHG02362_H772LDMXX_L2"],
     "PD114":    ["NDHG02360_H772LDMXX_L1", "NDHG02360_H772LDMXX_L2"],
     "PD115":    ["NDHG02361_H772LDMXX_L1", "NDHG02361_H772LDMXX_L2"],
-    "PD82":     ["NDHG02359_H772LDMXX_L1", "NDHG02359_H772LDMXX_L2"],
-    "TEST":     ["PROTOCOL_SEQUENCER_L1", "PROTOCOL_SEQUENCER_L2"] # the last is for testing purposes
+    "PD82":     ["NDHG02359_H772LDMXX_L1", "NDHG02359_H772LDMXX_L2"]#,
+#    "TEST":     ["PROTOCOL_SEQUENCER_L1", "PROTOCOL_SEQUENCER_L2"] # the last is for testing purposes
 }
 
 # Symlinking the raw data directory
@@ -1104,15 +1104,15 @@ rule vc_split_gatk_hc_chromosomewise:
 rule vc_split_gatk_hc_chromosomewise_all:
     input: expand("variants_{assembly}/{sample}.{chr}.vcf", \
                   assembly=["GRCh38"], \
-                  sample=["PD82"], \
+                  sample=EGYPT_SAMPLES, \
                   chr=CHR_GRCh38)
-                  #[x for x in EGYPT_SAMPLES if not x in ["EGYPTREF","TEST"]], \
 
 # --intervals / -L: One or more genomic intervals over which to operate
 rule vc_joint_genotyping:
-    input: vcfs=expand("variants_{{assembly}}/{sample}.chromosome.{{chr}}.vcf", sample=[x for x in EGYPT_SAMPLES if not x in ["TEST"]]),
+    input: vcfs=expand("variants_{{assembly}}/{sample}.chromosome.{{chr}}.vcf", \
+                       sample=EGYPT_SAMPLES),
            ref="seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
-           dbsnp="dbsnp_{assembly}/dbsnp.vcf.gz"
+#           dbsnp="dbsnp_{assembly}/dbsnp.vcf.gz"
     output: "variants_{assembly}/egyptians.chromosome.{chr}.vcf"
     conda: "envs/variant_calling.yaml"
     params: variant_files=lambda wildcards, input: " --variant " + \
@@ -1328,7 +1328,7 @@ POPULATIONS_1000G = [
 ]
 POPULATIONS_AFR = ["ACB","ASW","ESN","GWD","LWK","MSL","YRI"]
 POPULATIONS_EUR = ["CEU","FIN","GBR","IBS","TSI"]
-rule select_pop_from_1000g:
+rule gp_select_pop_from_1000g:
     input: "1000_genomes/integrated_call_samples_v2.20130502.ALL.ped"
     output: "genotype_pcs/keep_indiv.txt"
     run:
@@ -1345,7 +1345,7 @@ rule gp_make_pop_annotation:
     run:
         with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
             # First write the egyptians
-            for egyptian in [x for x in EGYPT_SAMPLES if not x in ["EGYPTREF","TEST"]]:
+            for egyptian in EGYPT_SAMPLES:
                 # PD114, PD115, PD82 are from Upper Egypt
                 if egyptian[:2] == "PD":
                     f_out.write(egyptian+"\tEGU\tEGY\n")
@@ -1895,7 +1895,7 @@ rule gc_filter_annotated_files:
 
 rule gc_concat_filter_annotated_files:
     input: expand("gene_centric/{gene}/{gene}.{sample}_annovar_filtered.txt", \
-                   gene=GENES,sample=[x for x in EGYPT_SAMPLES if not x in ["EGYPTREF","TEST"]])
+                   gene=GENES, sample=EGYPT_SAMPLES)
     output: "gene_centric/annovar_filtered.txt"
     run:
         out_lines = []
