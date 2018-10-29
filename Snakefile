@@ -1110,7 +1110,7 @@ rule vc_split_gatk_hc_chromosomewise_all:
 
 # --intervals / -L: One or more genomic intervals over which to operate
 rule vc_joint_genotyping:
-    input: vcfs=expand("variants_{{assembly}}/{sample}.chromosome.{{chr}}.vcf", sample=[x for x in EGYPT_SAMPLES if not x in s"TEST"]]),
+    input: vcfs=expand("variants_{{assembly}}/{sample}.chromosome.{{chr}}.vcf", sample=[x for x in EGYPT_SAMPLES if not x in ["TEST"]]),
            ref="seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
            dbsnp="dbsnp_{assembly}/dbsnp.vcf.gz"
     output: "variants_{assembly}/egyptians.chromosome.{chr}.vcf"
@@ -1831,6 +1831,7 @@ rule gc_get_dbsnp_variants:
     input: vcf="dbsnp_GRCh38/dbsnp.vcf.gz",
            bed="gene_centric/{gene}/{gene}.bed"
     output: "gene_centric/{gene}/{gene}_dbsnp.vcf.gz"
+    conda: "envs/genotype_pcs.yaml"
     shell: "vcftools --gzvcf {input.vcf} " + \
                     "--bed {input.bed} " + \
                     "--recode " + \
@@ -1856,6 +1857,7 @@ rule gc_get_1000g_variants:
     input: vcf="1000_genomes/ALL.GRCh38.genotypes.20170504.vcf.gz",
            bed="gene_centric/{gene}/{gene}.bed"
     output: "gene_centric/{gene}/{gene}_1000g.vcf.gz"
+    conda: "envs/genotype_pcs.yaml"
     shell: "vcftools --gzvcf {input.vcf} " + \
                     "--bed {input.bed} " + \
                     "--recode " + \
@@ -1867,3 +1869,55 @@ rule gc_get_variants_all:
     input: #expand("gene_centric/{gene}/{gene}_egyptians.vcf.gz",gene=GENES),
            expand("gene_centric/{gene}/{gene}_dbsnp.vcf.gz",gene=GENES),
            expand("gene_centric/{gene}/{gene}_1000g.vcf.gz",gene=GENES)
+
+# Preprocessing and filtering the Annovar annotated files from Axel
+# Here, first filter genes that are within the specified gene, are exonic and 
+# variants with CADD score >=20
+rule gc_filter_annotated_files:
+    input: "data/annovar/{gene}.{sample}.avinput.hg38_multianno.txt"
+    output: "gene_centric/{gene}/{gene}.{sample}_annovar_filtered.txt"
+    run:
+        with open (input[0],"r") as f_in, open (output[0],"w") as f_out:
+            for line in f_in:
+                s = line.split("\t")
+                if line[:3] == "Chr":
+                    f_out.write(line)
+                    continue
+                gene = s[6]
+                cadd_phred = s[69]
+                if cadd_phred in ["NA","."]:
+                    continue
+                function = s[5]
+                if gene == wildcards.gene and \
+                   float(cadd_phred) >= 20 and \
+                   function == "exonic":
+                   f_out.write(line)
+
+rule gc_concat_filter_annotated_files:
+    input: expand("gene_centric/{gene}/{gene}.{sample}_annovar_filtered.txt", \
+                   gene=GENES,sample=[x for x in EGYPT_SAMPLES if not x in ["EGYPTREF","TEST"]])
+    output: "gene_centric/annovar_filtered.txt"
+    run:
+        out_lines = []
+        i = 0
+        for filename in input:
+            with open (filename,"r") as f_in:
+                for line in f_in:
+                    if line[:3] == "Chr":
+                        header = "Sample\t"+line
+                        continue
+                    sample = filename.split(".")[1].split("_")[0]
+                    s = line.split("\t")
+                    chrom = s[0]
+                    pos = s[1]
+                    out_lines.append([sample]+s)
+            # Sort by sample tertiary
+            out_lines = sorted(out_lines, key=lambda x: x[0])
+            # Sort py position secondary
+            out_lines = sorted(out_lines,key=lambda x: x[2])
+            # Sort by chromosome primarily
+            out_lines = sorted(out_lines,key=lambda x: x[1])
+            with open (output[0],"w") as f_out:
+                f_out.write(header)
+                for elem in out_lines:
+                    f_out.write("\t".join(elem)) 

@@ -14,7 +14,7 @@ fi
 source activate workflow_lied_egypt_genome
 
 echo "RUNNING SNAKEMAKE WORKFLOW..."
-snakemake --reason -n --rerun-incomplete -k -j 10 --resources io=4 --use-conda --jobname "{jobid}.{rulename}.sh" --cluster "sbatch --mem 16G --partition=longterm --time 0-06:00:00 -c 2 -o log/%j.{rule}.log" --printshellcmds gc_get_variants_all # results/repeatmasker_comparison.txt
+snakemake -n --reason --rerun-incomplete -k -j 10 --resources io=4 --use-conda --jobname "{jobid}.{rulename}.sh" --cluster "sbatch --mem 16G --partition=longterm --time 14-00:00:00 -c 2 -o log/%j.{rule}.log" --printshellcmds gc_get_variants_all # results/repeatmasker_comparison.txt
 
 source deactivate
 conda list -n workflow_lied_egypt_genome --export > environment_versions.yaml
