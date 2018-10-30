@@ -1866,7 +1866,7 @@ rule gc_get_1000g_variants:
                     "| bgzip > {output}"
 
 rule gc_get_variants_all:
-    input: #expand("gene_centric/{gene}/{gene}_egyptians.vcf.gz",gene=GENES),
+    input: expand("gene_centric/{gene}/{gene}_egyptians.vcf.gz",gene=GENES),
            expand("gene_centric/{gene}/{gene}_dbsnp.vcf.gz",gene=GENES),
            expand("gene_centric/{gene}/{gene}_1000g.vcf.gz",gene=GENES)
 
