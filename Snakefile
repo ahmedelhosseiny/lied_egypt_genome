@@ -1442,13 +1442,19 @@ rule gp_concatenate_chr_vcfs:
     conda: "envs/genotype_pcs.yaml"
     shell: "vcf-concat --pad-missing {input} | bgzip > {output}"
 
+# VCF file for the egyptians only (all chromosomes)
+rule gp_cp_egyptian_vcfs:
+    input: "variants_GRCh38/egyptians.vcf.gz"
+    output: "genotype_pcs/EGYPT_GRCh38.vcf.gz"
+    shell: "cp {input} {output}"
+
 # Converting vcf files to plink binary format (bed/bim/fam) for preparing for
 # Eigenstrat analysis
 rule gp_vcf_to_plink:
-    input: "genotype_pcs/EGYPT_AFR_EUR_GRCh38.vcf.gz"
-    output: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38.bed",
-            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38.bim",
-            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38.fam"
+    input: "genotype_pcs/{set}_GRCh38.vcf.gz"
+    output: "genotype_pcs/plink/{set}_GRCh38.bed",
+            "genotype_pcs/plink/{set}_GRCh38.bim",
+            "genotype_pcs/plink/{set}_GRCh38.fam"
     params: out_base=lambda wildcards, output: output[0][:-4]
     conda: "envs/genotype_pcs.yaml"
     shell: "plink2 --vcf {input} " + \
@@ -1462,14 +1468,14 @@ rule gp_vcf_to_plink:
 # Therefore, make lists of SNPs in the respective regions to be removed,
 # Then: Concatenate all the SNPs to be removed
 rule gp_find_snps_from_high_ld_regions:
-    input: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38.bed", 
-           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38.bim",
-           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38.fam"
-    output: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_6_25-33.5.snplist",
-            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_5_44-51.5.snplist",
-            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_8_8-12.snplist",
-            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_11_45-57.snplist",
-            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_exclusion.snplist" 
+    input: "genotype_pcs/plink/{set}_GRCh38.bed", 
+           "genotype_pcs/plink/{set}_GRCh38.bim",
+           "genotype_pcs/plink/{set}_GRCh38.fam"
+    output: "genotype_pcs/plink/{set}_GRCh38_6_25-33.5.snplist",
+            "genotype_pcs/plink/{set}_GRCh38_5_44-51.5.snplist",
+            "genotype_pcs/plink/{set}_GRCh38_8_8-12.snplist",
+            "genotype_pcs/plink/{set}_GRCh38_11_45-57.snplist",
+            "genotype_pcs/plink/{set}_GRCh38_exclusion.snplist" 
     params: in_base = lambda wildcards, input: input[0][:-4],
             chr6_base = lambda wildcards, output: output[0][:-8],
             chr5_base = lambda wildcards, output: output[1][:-8],
@@ -1505,13 +1511,13 @@ rule gp_find_snps_from_high_ld_regions:
 
 # Now exclude the SNPs from these regions
 rule gp_exclude_snps_from_high_ld_regions:
-    input: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38.bed", 
-           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38.bim",
-           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38.fam",
-           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_exclusion.snplist"
-    output: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.bed", 
-            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.bim",
-            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.fam"
+    input: "genotype_pcs/plink/{set}_GRCh38.bed", 
+           "genotype_pcs/plink/{set}_GRCh38.bim",
+           "genotype_pcs/plink/{set}_GRCh38.fam",
+           "genotype_pcs/plink/{set}_GRCh38_exclusion.snplist"
+    output: "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.bed", 
+            "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.bim",
+            "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.fam"
     params: in_base = lambda wildcards, input: input[0][:-4],
             out_base = lambda wildcards, output: output[0][:-4]
     conda: "envs/genotype_pcs.yaml"
@@ -1534,11 +1540,11 @@ rule gp_exclude_snps_from_high_ld_regions:
 # Wang 2009 used: 100 ? 0.2
 # Fellay 2009 used: 1500 150 0.2 
 rule gp_find_ld_pruned_snps:
-    input: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.bed", 
-           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.bim",
-           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.fam"
-    output: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.prune.in", 
-            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.prune.out"
+    input: "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.bed", 
+           "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.bim",
+           "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.fam"
+    output: "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.prune.in", 
+            "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.prune.out"
     params: in_base = lambda wildcards, input: input[0][:-4]
     conda: "envs/genotype_pcs.yaml"
     shell: "plink2 --bfile {params.in_base} " + \
@@ -1547,13 +1553,13 @@ rule gp_find_ld_pruned_snps:
 
 # Now exclude the pruned SNPs
 rule gp_exclude_ld_pruned_snps:
-    input: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.bed", 
-            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.bim",
-            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.fam",
-            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.prune.out"
-    output: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.bed", 
-            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.bim",
-            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.fam"
+    input: "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.bed", 
+            "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.bim",
+            "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.fam",
+            "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.prune.out"
+    output: "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.bed", 
+            "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.bim",
+            "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.fam"
     params: in_base = lambda wildcards, input: input[0][:-4],
             out_base = lambda wildcards, output: output[0][:-4]
     conda: "envs/genotype_pcs.yaml"
@@ -1564,11 +1570,11 @@ rule gp_exclude_ld_pruned_snps:
 
 # Conversion from bed/bim/fam to ped/map
 rule gp_convert_to_ped_map:
-    input: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.bed", 
-           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.bim",
-           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.fam"
-    output: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.ped", 
-            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.map"
+    input: "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.bed", 
+           "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.bim",
+           "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.fam"
+    output: "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.ped", 
+            "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.map"
     params: in_base = lambda wildcards, input: input[0][:-4]
     conda: "envs/genotype_pcs.yaml"
     shell: "plink2 --bfile {params.in_base} " + \
@@ -1577,12 +1583,12 @@ rule gp_convert_to_ped_map:
 
 # Write the parameter file needed by the Eigensoft convertf program
 rule gp_eigentstrat_parameter_file:
-    input: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.ped", 
-           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.map"
-    output: "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.ped2eigenstrat.params",
-    params: gout="genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.eigenstratgeno",
-            sout="genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.snp",
-            iout="genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.ind"
+    input: "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.ped", 
+           "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.map"
+    output: "genotype_pcs/eigenstrat/{set}_GRCh38.ped2eigenstrat.params",
+    params: gout="genotype_pcs/eigenstrat/{set}_GRCh38.eigenstratgeno",
+            sout="genotype_pcs/eigenstrat/{set}_GRCh38.snp",
+            iout="genotype_pcs/eigenstrat/{set}_GRCh38.ind"
     run: 
         with open(output[0],"w") as f_out:
             f_out.write("genotypename:    "+input[0]+"\n")
@@ -1596,12 +1602,12 @@ rule gp_eigentstrat_parameter_file:
 
 # This is the actual conversion from ped format to the eigenstrat input format
 rule gp_ped_to_eigentstrat:
-    input: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.ped", 
-           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions_pruned.map",
-           "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.ped2eigenstrat.params"
-    output: "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.eigenstratgeno",
-            "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.snp",
-            "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.ind"
+    input: "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.ped", 
+           "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.map",
+           "genotype_pcs/eigenstrat/{set}_GRCh38.ped2eigenstrat.params"
+    output: "genotype_pcs/eigenstrat/{set}_GRCh38.eigenstratgeno",
+            "genotype_pcs/eigenstrat/{set}_GRCh38.snp",
+            "genotype_pcs/eigenstrat/{set}_GRCh38.ind"
     conda: "envs/genotype_pcs.yaml"
     shell: "convertf -p {input[2]}"
 
@@ -1623,16 +1629,19 @@ rule gp_ped_to_eigentstrat:
 #                    to remove outliers during each outlier removal iteration.
 # -s sigma         : (Default is 6.0) number of standard deviations which an
 #                    individual must exceed, along one of topk top principal
-# 		               components, in order to be removed as an outlier.
+# 		             components, in order to be removed as an outlier.
+# Watch out: The clusters smartpca.perl scripts is used, but calling the conda
+# smartpca. ploteig seems to not be included in conda, and again is used by 
+# from the cluster. This is not working properly though and not producing the 
+# PDF plot. Probably it would be sufficient to use the smartpca binary.
 rule gp_eigensoft_smartpca:
-    input: "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.eigenstratgeno",
-           "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.snp",
-           "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.ind"
-    output: "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.pca",
-            "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.plot.pdf",
-            "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.eval",
-            "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.log",
-            "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.pca.evec"
+    input: "genotype_pcs/eigenstrat/{set}_GRCh38.eigenstratgeno",
+           "genotype_pcs/eigenstrat/{set}_GRCh38.snp",
+           "genotype_pcs/eigenstrat/{set}_GRCh38.ind"
+    output: "genotype_pcs/eigenstrat/{set}_GRCh38.pca",
+            "genotype_pcs/eigenstrat/{set}_GRCh38.eval",
+            "genotype_pcs/eigenstrat/{set}_GRCh38.log",
+            "genotype_pcs/eigenstrat/{set}_GRCh38.pca.evec",
     params: out_base = lambda wildcards, output: output[0][:-4]
     conda: "envs/genotype_pcs.yaml"
     shell: "smartpca.perl -i {input[0]} " + \
@@ -1640,17 +1649,16 @@ rule gp_eigensoft_smartpca:
                          "-b {input[2]} " + \
                          "-o {output[0]} " + \
                          "-p {params.out_base}.plot " + \
-                         "-e {output[2]} " + \
-                         "-l {output[3]} " + \
-                         "-m 0; " + \
-           "mv EGYPT_AFR_EUR_GRCh38.plot.pdf genotype_pcs/eigenstrat/."
+                         "-e {output[1]} " + \
+                         "-l {output[2]} " + \
+                         "-m 0; "
 
 # Computing the Tracy-Widom statistics to evaluate the statistical 
 # significance of each principal component identified by pca
 rule gp_tracy_widom_pval:
-    input: "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.eval",
+    input: "genotype_pcs/eigenstrat/{set}_GRCh38.eval",
            "data/misc/twtable"
-    output: "genotype_pcs/eigenstrat/EGYPT_AFR_EUR_GRCh38.tw"
+    output: "genotype_pcs/eigenstrat/{set}_GRCh38.tw"
     conda: "envs/genotype_pcs.yaml"
     shell: "twstats -i {input[0]} " + \
                    "-t {input[1]} " + \
@@ -1666,10 +1674,26 @@ rule gp_plot_gt_pcs:
             "genotype_pcs/figures/EGYPT_AFR_EUR_GRCh38_pca_2vs3.pdf",
             "genotype_pcs/figures/EGYPT_AFR_EUR_GRCh38_pca_2vs4.pdf",
             "genotype_pcs/figures/EGYPT_AFR_EUR_GRCh38_pca_3vs4.pdf",
-            "genotype_pcs/figures/EGYPT_AFR_EUR_GRCh38_scree_plot.pdf"
+            "genotype_pcs/figures/EGYPT_AFR_EUR_GRCh38_scree_plot.pdf",
+            "genotype_pcs/figures/EGYPT_AFR_EUR_GRCh38_pca_3d.pdf"
     params: out_path = "genotype_pcs/figures/"
     conda: "envs/genotype_pcs.yaml"
     script: "scripts/plot_gt_pcs.R"
+
+rule gp_plot_gt_pcs_egyptians:
+    input: "genotype_pcs/eigenstrat/EGYPT_GRCh38.pca.evec",
+           "genotype_pcs/annotation_EGYPT_AFR_EUR_GRCh38.txt"
+    output: "genotype_pcs/figures/EGYPT_GRCh38_pca_1vs2.pdf",
+            "genotype_pcs/figures/EGYPT_GRCh38_pca_1vs3.pdf",
+            "genotype_pcs/figures/EGYPT_GRCh38_pca_1vs4.pdf",
+            "genotype_pcs/figures/EGYPT_GRCh38_pca_2vs3.pdf",
+            "genotype_pcs/figures/EGYPT_GRCh38_pca_2vs4.pdf",
+            "genotype_pcs/figures/EGYPT_GRCh38_pca_3vs4.pdf",
+            "genotype_pcs/figures/EGYPT_GRCh38_scree_plot.pdf",
+            "genotype_pcs/figures/EGYPT_GRCh38_pca_3d.pdf"
+    params: out_path = "genotype_pcs/figures/"
+    conda: "envs/genotype_pcs.yaml"
+    script: "scripts/plot_gt_pcs_egyptians.R"
 
 
 ################################################################################

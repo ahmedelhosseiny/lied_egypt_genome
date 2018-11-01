@@ -2,6 +2,8 @@
 results
 data
 log
+novogene
+1000_genomes
 ext_tools
 busco_lineage
 info
@@ -13,6 +15,8 @@ busco_GRCh38
 repeatmasked_*
 align_lastz_*
 nucdiff_GRCh38_*
+genotype_pcs*
+gene_centric*
 environment_versions.yaml
 slurm-*
 tmp*
