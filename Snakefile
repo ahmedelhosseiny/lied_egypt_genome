@@ -1147,6 +1147,13 @@ rule vc_combine_chromosomewise_vcf:
     conda: "envs/genotype_pcs.yaml"
     shell: "vcf-concat --pad-missing {input} | bgzip > {output}"
 
+# and indexing them
+rule vc_index_egyptians:
+    input: "variants_{assembly}/egyptians.vcf.gz"
+    output: "variants_{assembly}/egyptians.vcf.gz.tbi"
+    conda: "envs/genotype_pcs.yaml"    
+    shell: "tabix -p vcf {input}"
+
 # Doing the variant calling for all 10 samples
 # and collecting alignment summary stats
 rule vc_snp_calling_with_gatk_hc_all:
@@ -1442,11 +1449,19 @@ rule gp_concatenate_chr_vcfs:
     conda: "envs/genotype_pcs.yaml"
     shell: "vcf-concat --pad-missing {input} | bgzip > {output}"
 
-# VCF file for the egyptians only (all chromosomes)
-rule gp_cp_egyptian_vcfs:
-    input: "variants_GRCh38/egyptians.vcf.gz"
+# VCF file for the egyptians only (all chromosomes) here gets annotated with 
+# the rsids from dbsnp
+rule gp_cp_egyptian_vcfs_and_annotate_rsids:
+    input: vcf="variants_GRCh38/egyptians.vcf.gz",
+           index="variants_GRCh38/egyptians.vcf.gz.tbi",
+           dbsnp="dbsnp_GRCh38/dbsnp.vcf.gz"
     output: "genotype_pcs/EGYPT_GRCh38.vcf.gz"
-    shell: "cp {input} {output}"
+    conda: "envs/genotype_pcs.yaml"
+    shell: "bcftools annotate --annotations {input.dbsnp} " + \
+                             "--columns ID " + \
+                             "--output {output} " + \
+                             "--output-type z " + \
+                             "{input.vcf} "
 
 # Converting vcf files to plink binary format (bed/bim/fam) for preparing for
 # Eigenstrat analysis
