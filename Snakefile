@@ -1578,6 +1578,8 @@ rule gp_exclude_snps_from_high_ld_regions:
 # Anderson 2010 used: 50 5 0.2
 # Wang 2009 used: 100 ? 0.2
 # Fellay 2009 used: 1500 150 0.2 
+# For 1000 genomes, we use: 1000 10 0.2
+# For low number of egyptian samples, we use 50 5 0.2
 rule gp_find_ld_pruned_snps:
     input: "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.bed", 
            "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.bim",
@@ -1587,7 +1589,7 @@ rule gp_find_ld_pruned_snps:
     params: in_base = lambda wildcards, input: input[0][:-4]
     conda: "envs/genotype_pcs.yaml"
     shell: "plink2 --bfile {params.in_base} " + \
-                  "--indep-pairwise 1000 10 0.2 " + \
+                  "--indep-pairwise 50 5 0.2 " + \
                   "--out {params.in_base} "
 
 # Now exclude the pruned SNPs
@@ -1789,7 +1791,8 @@ rule ng_plot_uncovered_bases_distribution:
 ################################################################################
 
 # These are the genes of interest (ABCC7=CFTR, HD=HDDC3?, Factor V=F5)
-GENES = ["CFTR","HDDC3","DMD","BRCA1","BRCA2","TP53","EGFR","APP","PSEN1","F5","CARD11"]
+GENES = ["CFTR","HDDC3","DMD","BRCA1","BRCA2","TP53","EGFR","APP","PSEN1","F5", \
+         "CARD11","LAMA4"]
 
 # Therefore, obtain a recent Ensembl annotation file first
 rule get_ensembl_gene_annotation_gtf:
@@ -1821,7 +1824,8 @@ WINDOW = {
     "APP": [100000,100000],
     "PSEN1": [100000,100000],
     "F5": [100000,100000],
-    "CARD11": [100000,100000]
+    "CARD11": [100000,100000],
+    "LAMA4": [100000,100000]
 }
 rule gc_get_start_end_position:
     input: "gene_centric/{gene}/{gene}.gtf"
@@ -1983,4 +1987,62 @@ rule gc_concat_filter_annotated_files:
             with open (output[0],"w") as f_out:
                 f_out.write(header)
                 for elem in out_lines:
-                    f_out.write("\t".join(elem)) 
+                    f_out.write("\t".join(elem))
+
+# Preprocessing and filtering the Annovar annotated files from Axel, here all
+# variants have been annotated.
+# Here, first filter genes that are within the specified gene, are exonic and 
+# variants with CADD score >=20; further, the variants need to be rare,
+# i.e. low or NA for gnomAD_exome_ALL
+rule av_filter_annotated_files:
+    input: "data/annovar/sample.{sample}.avinput.hg38_multianno.txt"
+    output: "annovar/sample.{sample}_annovar_filtered.txt",
+            "annovar/sample.{sample}_annovar_filtered_na.txt",
+    run:
+        with open (input[0],"r") as f_in, open (output[0],"w") as f_out, \
+                                          open (output[1],"w") as f_out_na:
+            for line in f_in:
+                s = line.split("\t")
+                if line[:3] == "Chr":
+                    f_out.write(line)
+                    continue
+                gene = s[6]
+                gnomAD_exome = s[11]
+                cadd_phred = s[69]
+                if cadd_phred in ["NA","."]:
+                    continue
+                function = s[5]
+                if float(cadd_phred) >= 20 and function == "exonic":
+                    if gnomAD_exome in ["NA","."]:
+                        f_out_na.write(line)
+                    elif float(gnomAD_exome) <= 0.001:
+                        f_out.write(line)
+
+rule av_concat_filter_annotated_files:
+    input: expand("annovar/sample.{sample}_annovar_filtered.txt", \
+                   sample=EGYPT_SAMPLES)
+    output: "annovar/annovar_filtered.txt"
+    run:
+        out_lines = []
+        i = 0
+        for filename in input:
+            with open (filename,"r") as f_in:
+                for line in f_in:
+                    if line[:3] == "Chr":
+                        header = "Sample\t"+line
+                        continue
+                    sample = filename.split(".")[1].split("_")[0]
+                    s = line.split("\t")
+                    chrom = s[0]
+                    pos = s[1]
+                    out_lines.append([sample]+s)
+            # Sort by sample tertiary
+            out_lines = sorted(out_lines, key=lambda x: x[0])
+            # Sort py position secondary
+            out_lines = sorted(out_lines,key=lambda x: x[2])
+            # Sort by chromosome primarily
+            out_lines = sorted(out_lines,key=lambda x: x[1])
+            with open (output[0],"w") as f_out:
+                f_out.write(header)
+                for elem in out_lines:
+                    f_out.write("\t".join(elem))
