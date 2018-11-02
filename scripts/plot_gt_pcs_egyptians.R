@@ -30,7 +30,7 @@ pcs <- read.table(filename,row.names=1,col.names=c("rowname","PC1","PC2","PC3","
 # Obtain the sample annotation
 sample_annotation <- read.table(annotation_file, header=FALSE)
 egyptian_ids <- c("EGYPTREF","LU18","LU19","LU2","LU22","LU23","LU9","PD114","PD115","PD82")
-sample_annotation <- sample_annotation[egyptian_ids,]
+sample_annotation <- sample_annotation[sample_annotation[,1] %in% egyptian_ids,]
 
 # Get the PC values of the Egyptians
 pc_egyptref <- pcs["EGYPTREF",]
@@ -41,23 +41,26 @@ pcs <- pcs[as.character(order),]
 # Make sure that rownames and sample annotation match
 all(as.character(sample_annotation[,1]) == row.names(pcs))
 
+print(pcs)
+
+
 
 ########## Genotype principal components ##########
 
 # Plot the PCs
 pc_col <- rainbow(2)
 pc_col[1] <- rainbow(14)[1]
-pc_col[2] <- rainbow(14)[2]
+pc_col[2] <- rainbow(14)[9]
 eig_pc1 <- eigenvalues[1]
 eig_pc2 <- eigenvalues[2]
 eig_pc3 <- eigenvalues[3]
 eig_pc4 <- eigenvalues[4]
-group <- sample_annotation[,2]
+group <- as.factor(as.vector(sample_annotation[,2]))
 
 # PC1/PC2
 pdf(fname_pca_1vs2)
 # pch=16
-fig <- xyplot(PC2~PC1,groups=group, data=as.data.frame(pcs),pch=16,cex=0.3,col=pc_col,main=draw.key(key=list(rect=list(col=pc_col),text=list(levels(group)))),xlab=paste("PC1 (",eig_pc1,")",sep=""),ylab=paste("PC2 (",eig_pc2,")",sep=""))
+fig <- xyplot(PC2~PC1,groups=group, data=as.data.frame(pcs),pch=16,cex=1,col=pc_col,main=draw.key(key=list(rect=list(col=pc_col),text=list(levels(group)))),xlab=paste("PC1 (",eig_pc1,")",sep=""),ylab=paste("PC2 (",eig_pc2,")",sep=""),panel=function(x,y,labels,...){panel.xyplot(pcs$PC1,pcs$PC2,...);ltext(x=pcs$PC1, y=pcs$PC2, labels=sample_annotation[,1], pos=1, offset=1, cex=0.4);})
 ## Overlay Egyptref samples
 fig <- fig + layer(panel.points(pc_egyptref$PC1, pc_egyptref$PC2, pch=1, cex=1, col='black'))
 fig
@@ -65,7 +68,7 @@ dev.off()
 
 # PC1/PC3
 pdf(fname_pca_1vs3)
-fig <- xyplot(PC3~PC1,groups=group, data=as.data.frame(pcs),pch=16,cex=0.3,col=pc_col,main=draw.key(key=list(rect=list(col=pc_col),text=list(levels(group)))),xlab=paste("PC1 (",eig_pc1,")",sep=""),ylab=paste("PC3 (",eig_pc3,")",sep=""))
+fig <- xyplot(PC3~PC1,groups=group, data=as.data.frame(pcs),pch=16,cex=1,col=pc_col,main=draw.key(key=list(rect=list(col=pc_col),text=list(levels(group)))),xlab=paste("PC1 (",eig_pc1,")",sep=""),ylab=paste("PC3 (",eig_pc3,")",sep=""),panel=function(x,y,labels,...){panel.xyplot(pcs$PC1,pcs$PC3,...);ltext(x=pcs$PC1, y=pcs$PC3, labels=sample_annotation[,1], pos=1, offset=1, cex=0.4);})
 ## Overlay Egyptian samples
 fig <- fig + layer(panel.points(pc_egyptref$PC1, pc_egyptref$PC3, pch=21, cex=1, col='black'))
 fig
@@ -73,7 +76,7 @@ dev.off()
 
 # PC1/PC4
 pdf(fname_pca_1vs4)
-fig <- xyplot(PC4~PC1,groups=group, data=as.data.frame(pcs),pch=16,cex=0.3,col=pc_col,main=draw.key(key=list(rect=list(col=pc_col),text=list(levels(group)))),xlab=paste("PC1 (",eig_pc1,")",sep=""),ylab=paste("PC4 (",eig_pc4,")",sep=""))
+fig <- xyplot(PC4~PC1,groups=group, data=as.data.frame(pcs),pch=16,cex=1,col=pc_col,main=draw.key(key=list(rect=list(col=pc_col),text=list(levels(group)))),xlab=paste("PC1 (",eig_pc1,")",sep=""),ylab=paste("PC4 (",eig_pc4,")",sep=""),panel=function(x,y,labels,...){panel.xyplot(pcs$PC1,pcs$PC4,...);ltext(x=pcs$PC1, y=pcs$PC4, labels=sample_annotation[,1], pos=1, offset=1, cex=0.4);})
 ## Overlay Egyptian samples
 fig <- fig + layer(panel.points(pc_egyptref$PC1, pc_egyptref$PC4, pch=21, cex=1, col='black'))
 fig
@@ -81,7 +84,7 @@ dev.off()
 
 # PC2/PC3
 pdf(fname_pca_2vs3)
-fig <- xyplot(PC3~PC2,groups=group, data=as.data.frame(pcs),pch=16,cex=0.3,col=pc_col,main=draw.key(key=list(rect=list(col=pc_col),text=list(levels(group)))),xlab=paste("PC2 (",eig_pc2,")",sep=""),ylab=paste("PC3 (",eig_pc3,")",sep=""))
+fig <- xyplot(PC3~PC2,groups=group, data=as.data.frame(pcs),pch=16,cex=1,col=pc_col,main=draw.key(key=list(rect=list(col=pc_col),text=list(levels(group)))),xlab=paste("PC2 (",eig_pc2,")",sep=""),ylab=paste("PC3 (",eig_pc3,")",sep=""),panel=function(x,y,labels,...){panel.xyplot(pcs$PC2,pcs$PC3,...);ltext(x=pcs$PC2, y=pcs$PC3, labels=sample_annotation[,1], pos=1, offset=1, cex=0.4);})
 ## Overlay Egyptian samples
 fig <- fig + layer(panel.points(pc_egyptref$PC2, pc_egyptref$PC3, pch=21, cex=1, col='black'))
 fig
@@ -89,7 +92,7 @@ dev.off()
 
 # PC2/PC4
 pdf(fname_pca_2vs4)
-fig <- xyplot(PC4~PC2,groups=group, data=as.data.frame(pcs),pch=16,cex=0.3,col=pc_col,main=draw.key(key=list(rect=list(col=pc_col),text=list(levels(group)))),xlab=paste("PC2 (",eig_pc2,")",sep=""),ylab=paste("PC4 (",eig_pc4,")",sep=""))
+fig <- xyplot(PC4~PC2,groups=group, data=as.data.frame(pcs),pch=16,cex=1,col=pc_col,main=draw.key(key=list(rect=list(col=pc_col),text=list(levels(group)))),xlab=paste("PC2 (",eig_pc2,")",sep=""),ylab=paste("PC4 (",eig_pc4,")",sep=""),panel=function(x,y,labels,...){panel.xyplot(pcs$PC2,pcs$PC4,...);ltext(x=pcs$PC2, y=pcs$PC4, labels=sample_annotation[,1], pos=1, offset=1, cex=0.4);})
 ## Overlay Egyptian samples
 fig <- fig + layer(panel.points(pc_egyptref$PC2, pc_egyptref$PC4, pch=21, cex=1, col='black'))
 fig
@@ -97,7 +100,7 @@ dev.off()
 
 # PC3/PC4
 pdf(fname_pca_3vs4)
-fig <- xyplot(PC4~PC3,groups=group, data=as.data.frame(pcs),pch=16,cex=0.3,col=pc_col,main=draw.key(key=list(rect=list(col=pc_col),text=list(levels(group)))),xlab=paste("PC3 (",eig_pc3,")",sep=""),ylab=paste("PC4 (",eig_pc4,")",sep=""))
+fig <- xyplot(PC4~PC3,groups=group, data=as.data.frame(pcs),pch=16,cex=1,col=pc_col,main=draw.key(key=list(rect=list(col=pc_col),text=list(levels(group)))),xlab=paste("PC3 (",eig_pc3,")",sep=""),ylab=paste("PC4 (",eig_pc4,")",sep=""),panel=function(x,y,labels,...){panel.xyplot(pcs$PC3,pcs$PC4,...);ltext(x=pcs$PC3, y=pcs$PC4, labels=sample_annotation[,1], pos=1, offset=1, cex=0.4);})
 ## Overlay Egyptian samples
 fig <- fig + layer(panel.points(pc_egyptref$PC3, pc_egyptref$PC4, pch=21, cex=1, col='black'))
 fig

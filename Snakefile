@@ -1453,15 +1453,39 @@ rule gp_concatenate_chr_vcfs:
 # the rsids from dbsnp
 rule gp_cp_egyptian_vcfs_and_annotate_rsids:
     input: vcf="variants_GRCh38/egyptians.vcf.gz",
-           index="variants_GRCh38/egyptians.vcf.gz.tbi",
-           dbsnp="dbsnp_GRCh38/dbsnp.vcf.gz"
-    output: "genotype_pcs/EGYPT_GRCh38.vcf.gz"
+           vcf_index="variants_GRCh38/egyptians.vcf.gz.tbi",
+           dbsnp="dbsnp_GRCh38/dbsnp.vcf.gz",
+           dbsnp_index="dbsnp_GRCh38/dbsnp.vcf.gz.tbi"
+    output: "genotype_pcs/egyptians.vcf.gz"
     conda: "envs/genotype_pcs.yaml"
     shell: "bcftools annotate --annotations {input.dbsnp} " + \
                              "--columns ID " + \
                              "--output {output} " + \
                              "--output-type z " + \
                              "{input.vcf} "
+
+# Filtering egyptian only variants
+# Additional to maf and number of alleles, we also exclude all SNPs with 
+# missing data here, since we have only 10 individuals
+# --max-missing <float>: Exclude sites on the basis of the proportion of missing
+#                        data (defined to be between 0 and 1, where 0 allows 
+#                        sites that are completely missing and 1 indicates no 
+#                        missing data allowed).
+rule gp_filter_for_egyptian_only_pcs:
+    input: "genotype_pcs/egyptians.vcf.gz"
+    output: "genotype_pcs/EGYPT_GRCh38.vcf.gz"
+    params: log_base=lambda wildcards, output: output[0][:-7]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--min-alleles 2 " + \
+                    "--max-alleles 2 " + \
+                    "--maf 0.05 " + \
+                    "--hwe 0.000001 " + \
+                    "--max-missing 1 " + \
+                    "--recode-INFO-all " + \
+                    "--recode " + \
+                    "--out {params.log_base} " + \
+                    "--stdout | bgzip > {output[0]}"
 
 # Converting vcf files to plink binary format (bed/bim/fam) for preparing for
 # Eigenstrat analysis
