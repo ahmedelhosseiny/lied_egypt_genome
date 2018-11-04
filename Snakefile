@@ -393,6 +393,13 @@ rule run_repeatmasker_primary_assembly:
            "repeatmasked_EGYPTREF/Homo_sapiens.EGYPTREF.dna.primary_assembly.fa.tbl"
 
 # ... and on the individual scaffolds
+# Note: For AK1 and YORUBA, there are the following scaffolds, for which 
+# repeatmasker does not generate the output files, because "No repetitive 
+# sequences were detected". For these, I generated the fa.masked file manually
+# by copying the input file; further, I manually 
+# AK1: Scaffold1437, Scaffold0873, Scaffold2568, Scaffold2697, Scaffold2245
+# Yoruba: HS_LKPB_CHRUN_SCAFFOLD_{256,672,296,980,165,472,1137,1147,1547,1411,
+#         1355,1638,1014}
 rule run_repeatmasker_chromosomewise:
     input: expand("repeatmasked_GRCh38/Homo_sapiens.GRCh38.dna.{x}.fa.tbl", \
                   x=CHR_GRCh38),
@@ -442,7 +449,7 @@ rule repeatmasker_summary_table_yoruba:
 # one line for GRCh38
 rule comparison_repeatmasker:
     input: expand("repeatmasked_{assembly}/summary.txt", \
-                  assembly=["CEGYPTREF","AK1","YORUBA","GRCh38"])
+                  assembly=["EGYPTREF","CEGYPTREF","AK1","YORUBA","GRCh38"])
     output: "results/repeatmasker_comparison.txt"
     script: "scripts/repeatmasker_comparison.py"
 
@@ -1051,8 +1058,16 @@ rule vc_flagstat:
     output: "variants_{assembly}/{sample}.final.flagstat.txt"
     shell: "samtools flagstat {input} > {output}"
 
+# Making some stats about the overall number of bases etc.
+rule vc_bamstats:
+    input: "variants_{assembly}/{sample}.final.bam"
+    output: "variants_{assembly}/{sample}.final.bamstats.txt"
+    shell: "samtools stats {input} > {output}"
+
 rule vc_flagstat_all:
     input: expand("variants_{assembly}/{sample}.final.flagstat.txt", \
+                  assembly=["GRCh38"], sample=EGYPT_SAMPLES),
+           expand("variants_{assembly}/{sample}.final.bamstats.txt", \
                   assembly=["GRCh38"], sample=EGYPT_SAMPLES)
 
 ### 14. variant calling with GATK-HC
@@ -1252,25 +1267,16 @@ rule symlink_pacbio:
     output: directory("data/01.pacbio")
     shell: "ln -s /data/lied_egypt_genome/raw/P101HW18010820-01_human_2018.08.29/00.data/01.pacbio {output}"
 
-rule count_pacbio_reads:
-    input: expand("data/01.pacbio/{pb_files}.subreads.bam", \
-           pb_files = [item for subl in PACBIO_SAMPLES_TO_SEQRUN_PATH.values() \
+# Making some stats about the overall number of bases etc.
+rule pb_bamstats:
+    input: "data/01.pacbio/{pb_files}.subreads.bam"
+    output: "pacbio/{pb_files}.bamstats"
+    shell: "samtools stats {input} > {output}"
+
+rule pb_bamstats_all:
+    input: expand("pacbio/{pb_files}.bamstats", \
+            pb_files = [item for subl in PACBIO_SAMPLES_TO_SEQRUN_PATH.values() \
                        for item in subl])
-    output: "pacbio/num_reads.txt"
-    run:
-        shell("touch {output}")
-        for filename in input[1:]:
-            shell("samtools view {filename} | wc -l >> {output}.tmp")
-        sum = 0
-        with open("{output}.tmp","r") as f_in, open("{output}","r") as f_out:
-            for line in f_in:
-                s = line.strip().split(" ")
-                num = s[0]
-                sum += num
-                filename = s[1].split("/")[-1]
-                f_out.write(filename+"\t"+num+"\n")
-            f_out.write("Sum"+ "\t"+sum+"\n")
-                
     
 ################################################################################
 ##### Population stratification analysis using Eigenstrat (e.g. PC plots) ######
@@ -1471,6 +1477,9 @@ rule gp_cp_egyptian_vcfs_and_annotate_rsids:
 #                        data (defined to be between 0 and 1, where 0 allows 
 #                        sites that are completely missing and 1 indicates no 
 #                        missing data allowed).
+# Further, we select the set of SNPs after LD pruning using 1000 genomes data
+# The reason is that LD pruning on only the 10 individuals will not select
+# truly independent SNPs because the 10 individuals are not enough.
 rule gp_filter_for_egyptian_only_pcs:
     input: "genotype_pcs/egyptians.vcf.gz"
     output: "genotype_pcs/EGYPT_GRCh38.vcf.gz"
@@ -1578,26 +1587,36 @@ rule gp_exclude_snps_from_high_ld_regions:
 # Anderson 2010 used: 50 5 0.2
 # Wang 2009 used: 100 ? 0.2
 # Fellay 2009 used: 1500 150 0.2 
-# For 1000 genomes, we use: 1000 10 0.2
-# For low number of egyptian samples, we use 50 5 0.2
+# Watch out: the LD pruned SNPs (to be kept, to be pruned out) are always taken
+# from the entire set of Egyptian, European and African samples we have; there
+# we use as LD pruning parameter: 1000 10 0.2
 rule gp_find_ld_pruned_snps:
-    input: "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.bed", 
-           "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.bim",
-           "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.fam"
-    output: "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.prune.in", 
-            "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.prune.out"
+    input: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.bed", 
+           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.bim",
+           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.fam"
+    output: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.prune.in", 
+            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.prune.out"
     params: in_base = lambda wildcards, input: input[0][:-4]
     conda: "envs/genotype_pcs.yaml"
     shell: "plink2 --bfile {params.in_base} " + \
-                  "--indep-pairwise 50 5 0.2 " + \
+                  "--indep-pairwise 1000 10 0.2 " + \
                   "--out {params.in_base} "
 
 # Now exclude the pruned SNPs
+# We use the same set of pruned SNPs, those from the entire Egypt/Eur/Afr 
+# samples also for other subsets, because the LD pruning will not work well
+# for small numbers of samples
+# "--exclude {input[3]} " + \ in case the file is 
+# genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.prune.out
+# For the merged 1000g and egyptian data there should be no difference,
+# but for the egyptian only data there is, because we only want to keep IDs also
+# in the 1000 G data (and no rare variants, even if they are not rare in 
+# egyptians)
 rule gp_exclude_ld_pruned_snps:
     input: "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.bed", 
             "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.bim",
             "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.fam",
-            "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.prune.out"
+            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.prune.in"
     output: "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.bed", 
             "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.bim",
             "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.fam"
@@ -1605,7 +1624,7 @@ rule gp_exclude_ld_pruned_snps:
             out_base = lambda wildcards, output: output[0][:-4]
     conda: "envs/genotype_pcs.yaml"
     shell: "plink2 --bfile {params.in_base} " + \
-                  "--exclude {input[3]} " + \
+                  "--extract {input[3]} " + \
                   "--make-bed " + \
                   "--out {params.out_base}"
 

@@ -25,6 +25,7 @@ scaffold_info = []
 for fname in fnames_in:
     with open(fname,"r") as f_in:
         num_len_perc = []
+        skip_scaffold = False
         for line in f_in:
             # Skip lines wo information
             if line[0] in ["=","\n","-"] \
@@ -48,6 +49,10 @@ for fname in fnames_in:
             elif item == "total length":
                 total = [x for x in spec.split(" ") if not x in ["bp","%",""]]
                 tot_len = total[0]
+                # There are for AK1 5 and for YORUBA 13 scaffolds that have no 
+                # repeats; these are skipped here
+                if tot_len == "NA":
+                    skip_scaffold = True
                 tot_len_no_n = total[1].strip("(")
             elif item == "GC level":
                 gc = spec[:-2].strip()
@@ -73,6 +78,8 @@ for fname in fnames_in:
                                         masked,masked_percent, \
                                         ti_rep[0],ti_rep[1]]+num_len_perc)
                 continue
+            if skip_scaffold == True:
+                break
 
 # Sort by overall scaffold length and print header and then info to file
 sorted_scaffinfo = sorted(scaffold_info,key = lambda x: int(x[1]), reverse=True)

@@ -44,11 +44,9 @@ for filename in fnames_in:
             for i in range(len(sums)):
                 if i+1 in perc_col:
                     # Make sure this is a percentage column
-                    assert(0<=float(nums[i])<=100)
-                    if i == 4:
-                        print(str(nums[i])+" "+str(scaff_len)+" "+str(assembly_len))
+                    # 100.01 because of rounding issues (occurs once for yoruba)
+                    assert(0<=float(nums[i])<=100.01)
                     sums[i] += (scaff_len*nums[i]/assembly_len)
-                    print(nums[i])
                 else:
                         sums[i] += int(nums[i])
             # Round the percentage columns
