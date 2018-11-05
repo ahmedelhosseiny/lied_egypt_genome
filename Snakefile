@@ -2020,37 +2020,55 @@ rule gc_concat_filter_annotated_files:
 
 # Preprocessing and filtering the Annovar annotated files from Axel, here all
 # variants have been annotated.
-# Here, first filter genes that are within the specified gene, are exonic and 
-# variants with CADD score >=20; further, the variants need to be rare,
-# i.e. low or NA for gnomAD_exome_ALL
-rule av_filter_annotated_files:
+# Here, first filter variants that are exonic and rare according to no (="NA")
+# or according to low gnomAD_exome_ALL
+rule av_filter_egyptian_variants:
     input: "data/annovar/sample.{sample}.avinput.hg38_multianno.txt"
-    output: "annovar/sample.{sample}_annovar_filtered.txt",
-            "annovar/sample.{sample}_annovar_filtered_na.txt",
+    output: "annovar/sample.{sample}_annovar_egyptian.txt"
     run:
-        with open (input[0],"r") as f_in, open (output[0],"w") as f_out, \
-                                          open (output[1],"w") as f_out_na:
+        with open (input[0],"r") as f_in, open (output[0],"w") as f_out:
             for line in f_in:
-                s = line.split("\t")
                 if line[:3] == "Chr":
                     f_out.write(line)
                     continue
-                gene = s[6]
-                gnomAD_exome = s[11]
-                cadd_phred = s[69]
-                if cadd_phred in ["NA","."]:
-                    continue
+                s = line.split("\t")
                 function = s[5]
-                if float(cadd_phred) >= 20 and function == "exonic":
+                gnomAD_exome = s[11]
+                if function == "exonic":
                     if gnomAD_exome in ["NA","."]:
-                        f_out_na.write(line)
+                        f_out.write(line)
                     elif float(gnomAD_exome) <= 0.001:
                         f_out.write(line)
 
-rule av_concat_filter_annotated_files:
-    input: expand("annovar/sample.{sample}_annovar_filtered.txt", \
+# This is without applying any filtering
+rule av_nofilter_variants:
+    input: "data/annovar/sample.{sample}.avinput.hg38_multianno.txt"
+    output: "annovar/sample.{sample}_annovar_nofilter.txt"
+    shell: "cp {input} {output}"
+
+# Filter variants with CADD score greater 20
+rule av_filter_deleterious:
+    input: "annovar/sample.{sample}_annovar_egyptian.txt"
+    output: "annovar/sample.{sample}_annovar_egyptiandeleterious.txt" 
+    run:
+        with open (input[0],"r") as f_in, open (output[0],"w") as f_out:
+            for line in f_in:
+                if line[:3] == "Chr":
+                    f_out.write(line)
+                    continue
+                s = line.split("\t")
+                cadd_phred = s[69]
+                if cadd_phred in ["NA","."]:
+                    continue
+                if float(cadd_phred) >= 20:
+                        f_out.write(line)
+
+# Concatenate the file for all samples, add a 'sample' column and sort by 
+# position
+rule av_concat_files:
+    input: expand("annovar/sample.{sample}_annovar_{{filter}}.txt", \
                    sample=EGYPT_SAMPLES)
-    output: "annovar/annovar_filtered.txt"
+    output: "annovar/annovar_{filter}.txt"
     run:
         out_lines = []
         i = 0
@@ -2075,3 +2093,19 @@ rule av_concat_filter_annotated_files:
                 f_out.write(header)
                 for elem in out_lines:
                     f_out.write("\t".join(elem))
+
+# Filter (deleterious) variants to keep only those in more than one Egyptian
+rule av_deleterius_recurrent:
+    input: "annovar/annovar_{filter}.txt"
+    output: "annovar/annovar_{filter}_recurrent.txt"
+    shell: "cat {input} | " + \
+           "cut -f 2-100 | " + \
+           "sort | " + \
+           "uniq -c | " + \
+           "grep -v '      1 ' | " + \
+           "sed -e 's/      //g' | " + \
+           "sed -e 's/     //g' > {output}"
+
+rule av_recurrent_all:
+    input: expand("annovar/annovar_{filter}_recurrent.txt", \
+                  filter=["egyptian","egyptiandeleterious"])
