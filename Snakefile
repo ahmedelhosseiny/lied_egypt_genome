@@ -757,6 +757,16 @@ rule bwa_mem_all:
     input: expand("map_bwa_{assembly}/{lib}.bam", \
                   assembly=["EGYPTREF","GRCh38"], lib=ILLUMINA_LIBS)
 
+# Making some stats about the overall number of bases etc.
+rule illumina_bamstats:
+    input: "map_bwa_{assembly}/{lib}.bam"
+    output: "map_bwa_{assembly}/{lib}.bamstats"
+    shell: "samtools stats {input} > {output}"
+
+rule illumina_bamstats_all:
+    input: expand("map_bwa_{assembly}/{lib}.bamstats", \
+                  assembly=["EGYPTREF","GRCh38"], lib=ILLUMINA_LIBS)
+
 # For SNP calling and other things that are done for the Illumnina PE data
 rule symlink_illumina_wgs_dir:
     output: directory("data/02.DES")
