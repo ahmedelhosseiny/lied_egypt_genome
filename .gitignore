@@ -20,7 +20,7 @@ gene_centric*
 environment_versions.yaml
 slurm-*
 tmp*
-align_mummer_GRCh38_vs_EGYPTREF
+align_mummer_GRCh38_vs_*
 bwa_index
 dbsnp_GRCh38
 illumina_qc

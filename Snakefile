@@ -626,7 +626,8 @@ rule align_assemblies_with_mummer:
            "{input[0]} {input[1]}"
 
 rule align_assemblies_with_mummer_all:
-    input: "align_mummer_GRCh38_vs_EGYPTREF/assemblies/GRCh38_vs_EGYPTREF.delta"
+    input: expand("align_mummer_GRCh38_vs_{a}/assemblies/GRCh38_vs_{a}.delta", \
+                   a=["EGYPTREF","CEGYPTREF","AK1","YORUBA","GRCh38"])
 
 # All versus all dotplots of reference and Egyptian genome
 rule all_vs_all_dotplots_mummer:
@@ -868,7 +869,7 @@ rule vc_bwa_mem:
     input: index = "bwa_index/Homo_sapiens.{assembly}.dna.primary_assembly.sa",
            fastq_r1 = "data/raw_data/{sample}/{sample}_{infolane}_1.fq.gz",
            fastq_r2 = "data/raw_data/{sample}/{sample}_{infolane}_2.fq.gz"
-    output: "variants_{assembly}/{sample}_{infolane}.sam"
+    output: temp("variants_{assembly}/{sample}_{infolane}.sam")
     wildcard_constraints: sample="[A-Z,0-9]+", infolane="[A-Z,0-9,_]+"
     conda: "envs/variant_calling.yaml"
     shell: "bwa mem -t 24 " + \
@@ -881,7 +882,7 @@ rule vc_bwa_mem:
 # java -Xmx35g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar share/picard-2.18.9-0/picard.jar
 rule vc_clean_sam:
     input: "variants_{assembly}/{sample}_{infolane}.sam"
-    output: "variants_{assembly}/{sample}_{infolane}.cleaned.sam"
+    output: temp("variants_{assembly}/{sample}_{infolane}.cleaned.sam")
     conda: "envs/variant_calling.yaml"
     shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \ 
            "CleanSam " + \
@@ -892,7 +893,7 @@ rule vc_clean_sam:
 # Sorting by coordinates, making an index and outputting as bam
 rule vc_sort_and_index_sam:
     input: "variants_{assembly}/{sample}_{infolane}.cleaned.sam"
-    output: "variants_{assembly}/{sample}_{infolane}.cleaned.bam"
+    output: temp("variants_{assembly}/{sample}_{infolane}.cleaned.bam")
     conda: "envs/variant_calling.yaml"
     shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
            "SortSam " + \
@@ -905,7 +906,7 @@ rule vc_sort_and_index_sam:
 # verify mate-pair information between mates and fix if needed
 rule vc_fix_mates:
     input: "variants_{assembly}/{sample}_{infolane}.cleaned.bam"
-    output: "variants_{assembly}/{sample}_{infolane}.fixed.bam"
+    output: temp("variants_{assembly}/{sample}_{infolane}.fixed.bam")
     conda: "envs/variant_calling.yaml"
     shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
            "FixMateInformation " + \
@@ -917,7 +918,7 @@ rule vc_fix_mates:
 ### 5. Mark Duplicates
 rule vc_mark_duplicates:
     input: "variants_{assembly}/{sample}_{infolane}.fixed.bam"
-    output: "variants_{assembly}/{sample}_{infolane}.rmdup.bam",
+    output: temp("variants_{assembly}/{sample}_{infolane}.rmdup.bam"),
             "variants_{assembly}/{sample}_{infolane}.rmdup.txt"
     conda: "envs/variant_calling.yaml"
     shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
@@ -937,7 +938,7 @@ rule vc_merge_bams_per_sample:
            assembly = wildcards.assembly, \
            sample=wildcards.sample, \
            infolane = EGYPT_SAMPLES_TO_PREPLANES[wildcards.sample])
-    output: "variants_{assembly}/{sample}.merged.bam"
+    output: temp("variants_{assembly}/{sample}.merged.bam")
     params:
         picard_in=lambda wildcards, input: "I="+" I=".join(input)
     conda: "envs/variant_calling.yaml"
@@ -962,7 +963,7 @@ rule vc_alignment_metrics:
 ### 8. Replace Read Groups
 rule vc_replace_read_groups:
     input: "variants_{assembly}/{sample}.merged.bam"
-    output: "variants_{assembly}/{sample}.merged.rg.bam"
+    output: temp("variants_{assembly}/{sample}.merged.rg.bam")
     conda: "envs/variant_calling.yaml"
     shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
            "AddOrReplaceReadGroups " + \
@@ -991,7 +992,7 @@ rule vc_reorder:
     input: "variants_{assembly}/{sample}.merged.rg.bam",
            "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.fa",
            "seq_{assembly}/Homo_sapiens.{assembly}.dna.primary_assembly.dict"
-    output: "variants_{assembly}/{sample}.merged.rg.ordered.bam"
+    output: temp("variants_{assembly}/{sample}.merged.rg.ordered.bam")
     conda: "envs/variant_calling.yaml"
     shell: "java -Xmx80g -Djava.io.tmpdir=/data/lied_egypt_genome/tmp -jar .snakemake/conda/d590255f/share/picard-2.18.9-0/picard.jar " + \
            "ReorderSam " + \
@@ -1821,7 +1822,7 @@ rule ng_plot_uncovered_bases_distribution:
 
 # These are the genes of interest (ABCC7=CFTR, HD=HDDC3?, Factor V=F5)
 GENES = ["CFTR","HDDC3","DMD","BRCA1","BRCA2","TP53","EGFR","APP","PSEN1","F5", \
-         "CARD11","LAMA4"]
+         "CARD11","LAMA4","MRC1","USH2A"]
 
 # Therefore, obtain a recent Ensembl annotation file first
 rule get_ensembl_gene_annotation_gtf:
@@ -1854,7 +1855,9 @@ WINDOW = {
     "PSEN1": [100000,100000],
     "F5": [100000,100000],
     "CARD11": [100000,100000],
-    "LAMA4": [100000,100000]
+    "LAMA4": [100000,100000],
+    "MRC1": [100000,100000],
+    "USH2A": [100000,100000]
 }
 rule gc_get_start_end_position:
     input: "gene_centric/{gene}/{gene}.gtf"
@@ -2046,6 +2049,10 @@ rule av_nofilter_variants:
     output: "annovar/sample.{sample}_annovar_nofilter.txt"
     shell: "cp {input} {output}"
 
+rule av_nofilter_variants_all:
+    input: expand("annovar/sample.{sample}_annovar_nofilter.txt", \
+                  sample=EGYPT_SAMPLES)
+
 # Filter variants with CADD score greater 20
 rule av_filter_deleterious:
     input: "annovar/sample.{sample}_annovar_egyptian.txt"
@@ -2086,7 +2093,7 @@ rule av_concat_files:
             # Sort by sample tertiary
             out_lines = sorted(out_lines, key=lambda x: x[0])
             # Sort py position secondary
-            out_lines = sorted(out_lines,key=lambda x: x[2])
+            out_lines = sorted(out_lines,key=lambda x: int(x[2]))
             # Sort by chromosome primarily
             out_lines = sorted(out_lines,key=lambda x: x[1])
             with open (output[0],"w") as f_out:
@@ -2095,16 +2102,22 @@ rule av_concat_files:
                     f_out.write("\t".join(elem))
 
 # Filter (deleterious) variants to keep only those in more than one Egyptian
+# Sort the list by chromosome (-k 2 -g -s, .g: numeric, -s: stable to keep 
+# sorting by position) and then numerically by position (-k 3 -g)
 rule av_deleterius_recurrent:
     input: "annovar/annovar_{filter}.txt"
     output: "annovar/annovar_{filter}_recurrent.txt"
-    shell: "cat {input} | " + \
+    shell: "head -n 1 {input} > {output}; " + \
+           "cat {input} | " + \
            "cut -f 2-100 | " + \
            "sort | " + \
            "uniq -c | " + \
            "grep -v '      1 ' | " + \
            "sed -e 's/      //g' | " + \
-           "sed -e 's/     //g' > {output}"
+           "sed -e 's/     //g' | " + \
+           "sed -e 's/ /\t/1' | " + \
+           "sort -k 3 -g -t \"\t\" | " + \
+           "sort -k 2 -g -t \"\t\" -s >> {output}"
 
 rule av_recurrent_all:
     input: expand("annovar/annovar_{filter}_recurrent.txt", \
