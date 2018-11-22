@@ -782,8 +782,8 @@ rule run_fastqc:
     shell: "fastqc --outdir illumina_qc/fastqc/ {input[0]}"
 
 rule run_fastqc_all:
-    input: expand("illumina_qc/fastqc/{lib}_{read}_fastqc.html", lib=ILLUMINA_LIBS, \
-                                                          read=["1","2"])
+    input: expand("illumina_qc/fastqc/{lib}_{read}_fastqc.html", \
+                  lib=ILLUMINA_LIBS, read=["1","2"])
 
 
 ################################################################################
@@ -1288,7 +1288,159 @@ rule pb_bamstats_all:
     input: expand("pacbio/{pb_files}.bamstats", \
             pb_files = [item for subl in PACBIO_SAMPLES_TO_SEQRUN_PATH.values() \
                        for item in subl])
-    
+
+# Conversion of bam to fasta sequences
+rule pb_bam2fasta:
+    input: "data/01.pacbio/{pb_files}.subreads.bam"
+    output: temp("pacbio/{pb_files}.fa")
+    shell: "samtools fasta -t {input} > {output}"
+
+# Constructing one large fasta file
+rule pb_combined_fasta:
+    input: expand("pacbio/{pb_files}.fa", \
+            pb_files = [item for subl in PACBIO_SAMPLES_TO_SEQRUN_PATH.values() \
+                       for item in subl])
+    output: "pacbio/pb_EGYPTREF.fa"
+    shell: "cat {input} > {output}"
+
+# Get and install assembler
+rule install_wtdbg2_assembler:
+    output: "wtdbg2/wtdbg2",
+            "wtdbg2/wtpoa-cns"
+    shell: "git clone https://github.com/ruanjue/wtdbg2; " + \
+           "cd wtdbg2 && make "
+
+# Run assembler wtdbg2
+# WTDBG: De novo assembler for long noisy sequences
+# Author: Jue Ruan <ruanjue@gmail.com>
+# Version: 2.2 (20181111)
+# Usage: wtdbg2 [options] -i <reads.fa> -o <prefix> [reads.fa ...]
+# Options:
+#  -i <string> Long reads sequences file (REQUIRED; there can be multiple -i), []
+#  -o <string> Prefix of output files (REQUIRED), []
+#  -t <int>    Number of threads, 0 for all cores, [4]
+#  -f          Force to overwrite output files
+#  -x <string> Presets, comma delimited, []
+#             rsII/rs: -p 21 -S 4 -s 0.05 -L 5000
+#           sequel/sq: -p 0 -k 15 -AS 2 -s 0.05 -L 5000
+#        nanopore/ont: -p 19 -AS 2 -s 0.05 -L 5000
+#       corrected/ccs: -p 0 -k 19 -AS 4 -s 0.5 -L 5000
+#              Example: '-e 3 -x ont -S 1' in parsing order, -e will be infered by seq depth, -S will be 1
+#  -g <number> Approximate genome size (k/m/g suffix allowed) [0]
+#  -X <float>  Choose the best <float> depth from input reads(effective with -g) [50]
+#  -L <int>    Choose the longest subread and drop reads shorter than <int> [0]
+#  -k <int>    Kmer fsize, 0 <= k <= 25, [0]
+#  -p <int>    Kmer psize, 0 <= p <= 25, [21]
+#              k + p <= 25, seed is <k-mer>+<p-homopolymer-compressed>
+#  -K <float>  Filter high frequency kmers, maybe repetitive, [1000.05]
+#              >= 1000 and indexing >= (1 - 0.05) * total_kmers_count
+#  -E <int>    Min kmer frequency, [2]
+#  -S <float>  Subsampling kmers, 1/(<-S>) kmers are indexed, [4.00]
+#              -S is very useful in saving memeory and speeding up
+#              please note that subsampling kmers will have less matched length
+#  -l <float>  Min length of alignment, [2048]
+#  -m <float>  Min matched length by kmer matching, [200]
+#  -A          Keep contained reads during alignment
+#  -s <float>  Min similarity, calculated by kmer matched length / aligned length, [0.05]
+#  -e <int>    Min read depth of a valid edge, [3]
+#  -q          Quiet
+#  -v          Verbose (can be multiple)
+#  -V          Print version information and then exit
+#  --help      Show more options
+rule assembl_with_wtdbg2:
+    input: fasta="pacbio/pb_EGYPTREF.fa",
+           binary="wtdbg2/wtdbg2"
+    output: "pacbio/assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.lay.gz"
+    conda: "envs/wtdbg.yaml"
+    params: out_base=lambda wildcards, output: output[0][:-11]
+    shell: "./{input.binary} -i {input.fasta} " + \
+                           " -t 48 " + \
+                           " -g 3g " + \
+                           " -L 10000 " + \
+                           " -S 10 " + \
+                           " -o {params.out_base} "
+
+# WTPOA-CNS: Consensuser for wtdbg using PO-MSA
+# Author: Jue Ruan <ruanjue@gmail.com>
+# Version: 1.2
+# Usage: wtpoa-cns [options]
+# Options:
+#  -t <int>    Number of threads, [4]
+#  -d <string> Reference sequences for SAM input, will invoke sorted-SAM input mode and auto set '-j 100 -W 0 -w 1000'
+#  -u          Only process reference regions present in/between SAM alignments
+#  -p <string> Similar with -d, but translate SAM into wtdbg layout file
+#  -i <string> Input file(s) *.ctg.lay from wtdbg, +, [STDIN]
+#              Or sorted SAM files when having -d
+#  -o <string> Output files, [STDOUT]
+#  -f          Force overwrite
+#  -j <int>    Expected max length of node, or say the overlap length of two adjacent units in layout file, [1500] bp
+#  -M <int>    Match score, [2]
+#  -X <int>    Mismatch score, [-5]
+#  -I <int>    Insertion score, [-2]
+#  -D <int>    Deletion score, [-4]
+#  -B <int>    Bandwidth, [96]
+#  -W <int>    Window size in the middle of the first read for fast align remaining reads, [200]
+#              If $W is negative, will disable fast align, but use the abs($W) as Band align score cutoff
+#  -w <int>    Min size of aligned size in window, [$W * 0.5]
+#              In sorted-SAM input mode, -w is the sliding window size [2000]
+#  -A          Abort TriPOA when any read cannot be fast aligned, then try POA
+#  -R <int>    Realignment bandwidth, 0: disable, [16]
+#  -C <int>    Min count of bases to call a consensus base, [3]
+#  -F <float>  Min frequency of non-gap bases to call a consensus base, [0.5]
+#  -N <int>    Max number of reads in PO-MSA [20]
+#              Keep in mind that I am not going to generate high accurate consensus sequences here
+#  -v          Verbose
+#  -V          Print version information and then exit
+rule consensus_with_wtdbg2:
+    input: contig_layout="pacbio/assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.lay.gz",
+           binary="wtdbg2/wtpoa-cns"
+    output: "pacbio/assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.lay.fa"
+    conda: "envs/wtdbg.yaml"
+    shell: "./{input.binary} -i {input.contig_layout} " + \
+                           " -t 48 " + \
+                           " -o {output[0]}"
+
+
+################################################################################
+##### Assembly assessment and correction (Things related to 10X data) ##########
+################################################################################
+
+ILLUMINA_10X_LIBS = [
+    "NDHX00201-AK654_L4",
+    "NDHX00201-AK654_L5",
+    "NDHX00201-AK654_L6",
+    "NDHX00201-AK654_L7",
+    "NDHX00201-AK655_L4",
+    "NDHX00201-AK655_L5",
+    "NDHX00201-AK655_L6",
+    "NDHX00201-AK655_L7",
+    "NDHX00201-AK656_L4",
+    "NDHX00201-AK656_L5",
+    "NDHX00201-AK656_L6",
+    "NDHX00201-AK656_L7",
+    "NDHX00201-AK657_L4",
+    "NDHX00201-AK657_L5",
+    "NDHX00201-AK657_L6",
+    "NDHX00201-AK657_L7"
+]
+
+rule symlink_10X:
+    output: directory("data/03.10X")
+    shell: "ln -s /data/lied_egypt_genome/raw/P101HW18010820-01_human_2018.08.29/00.data/03.10X {output}"
+
+# Some QC: Here, fastqc for all Illumina PE WGS files
+rule run_10x_fastqc:
+    input: "data/03.10X/{lib}_{read}.fq.gz"
+    output: html="illumina_10x_qc/fastqc/{lib}_{read}_fastqc.html",
+            zip="illumina_10x_qc/fastqc/{lib}_{read}_fastqc.zip"
+    conda: "envs/fastqc.yaml"
+    shell: "fastqc --outdir illumina_10x_qc/fastqc/ {input[0]}"
+
+rule run_10x_fastqc_all:
+    input: expand("illumina_10x_qc/fastqc/{lib}_{read}_fastqc.html", \
+                  lib=ILLUMINA_10X_LIBS, read=["1","2"])
+
+
 ################################################################################
 ##### Population stratification analysis using Eigenstrat (e.g. PC plots) ######
 ################################################################################
