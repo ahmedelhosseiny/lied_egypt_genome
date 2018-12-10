@@ -49,8 +49,8 @@ for fname in fnames_in:
             elif item == "total length":
                 total = [x for x in spec.split(" ") if not x in ["bp","%",""]]
                 tot_len = total[0]
-                # There are for AK1 5 and for YORUBA 13 scaffolds that have no 
-                # repeats; these are skipped here
+                # There are for AK1 5, for YORUBA 13 and for EGYPTREFV2 28 
+                # scaffolds that have no repeats; these are skipped here
                 if tot_len == "NA":
                     skip_scaffold = True
                 tot_len_no_n = total[1].strip("(")

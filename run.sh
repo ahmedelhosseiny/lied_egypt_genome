@@ -14,7 +14,7 @@ fi
 source activate workflow_lied_egypt_genome
 
 echo "RUNNING SNAKEMAKE WORKFLOW..."
-snakemake --reason --rerun-incomplete -k -j 18 --resources io=4 --use-conda --jobname "{jobid}.{rulename}.sh" --cluster "sbatch --mem 242G --partition=longterm --time 14-00:00:00 -c 48 -o log/%j.{rule}.log" --printshellcmds consensus_with_wtdbg2 #run_fastqc_all run_10x_fastqc_all
+snakemake --reason --rerun-incomplete -k -j 18 --resources io=4 --use-conda --jobname "{jobid}.{rulename}.sh" --cluster "sbatch --mem 80G --partition=longterm --time 3-00:00:00 -c 24 -o log/%j.{rule}.log" --printshellcmds compute_content_and_assembly_numbers repeatmasker_summary_table_egyptrefv2 align_assemblies_with_mummer_all #consensus_with_wtdbg2
 
 source deactivate
 conda list -n workflow_lied_egypt_genome --export > environment_versions.yaml

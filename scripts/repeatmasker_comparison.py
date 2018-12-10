@@ -1,4 +1,7 @@
 # Making a comparison table of the repeatmasker results for several assemblies
+# Watch out: Scaffolds that have no repeats are not listed in the inout file 
+# and thus neglected in the overall computation; these should be only small
+# scaffolds though (but this should be checked!)
 
 # Getting input and output filenames
 fnames_in = snakemake.input
@@ -38,19 +41,24 @@ for filename in fnames_in:
             nums = [float(x) for x in s[1:]]
             scaff_len = nums[0]
             # Sum the numbers of this line to the previous ones; in case of 
-            # percentages, recompute them appropriatly using the scaffold length
-            # and the overall length
+            # percentages, sum the previous (number) referring to the percentage 
             # We have to use i+1, because the perc_col include the filename col
             for i in range(len(sums)):
                 if i+1 in perc_col:
                     # Make sure this is a percentage column
                     # 100.01 because of rounding issues (occurs once for yoruba)
                     assert(0<=float(nums[i])<=100.01)
-                    sums[i] += (scaff_len*nums[i]/assembly_len)
+                    sums[i] += nums[i-1]
                 else:
                         sums[i] += int(nums[i])
             # Round the percentage columns
             for i in range(len(sums)):
                 if i+1 in perc_col:
                     sums[i] = round(sums[i],2)
+        # Compute overall percentages based on overall numbers/counts
+        # Start with column 4 because 3 is the GC content which we don't want to
+        # recompute
+        for i in range(4,len(sums)):
+            if i+1 in perc_col:
+                sums[i] = round(100*sums[i]/assembly_len,2)    
         f_out.write(filename+"\t"+"\t".join([str(x) for x in sums])+"\n")

@@ -8,6 +8,9 @@ from Bio import SeqIO
 import os
 
 
+# Rules to be executed for new assemblies: compute_content_and_assembly_numbers,
+# repeatmasker_summary_table_egyptrefv2, align_assemblies_with_mummer_all, 
+
 ################################################################################
 ############### Writing some general statistics to file ########################
 ################################################################################
@@ -16,8 +19,13 @@ import os
 CHR_GRCh38 = ["chromosome."+str(x) for x in range(1,23)] \
            + ["chromosome."+str(x) for x in ["MT","X","Y"]]
 
-EGYPT_SCAFFOLDS = ["fragScaff_scaffold_"+str(x)+"_pilon" for x in range(0,41)] \
+EGYPTREF_SCAFFOLDS = ["fragScaff_scaffold_"+str(x)+"_pilon" for x in range(0,41)] \
                 + ["original_scaffold_"+str(x)+"_pilon" for x in range(41,145)]
+
+EGYPTREFV2_SCAFFOLDS = ["fragScaff_scaffold_"+str(x)+"_pilon" for x in range(0,226)] \
+                + ["original_scaffold_"+str(x)+"_pilon" for x in range(226,1728)]
+# Note: The EGYPTREFV2_SCAFFOLDS for which no repeats have been detected are:
+# original_scaffold_{1078,499,447,1298,778,956,1014,583,471,1349,303,1632,1186,1643,399,535,1662,1067,1724,1572,1701,985,719,1711,1101,318,1122,731}_pilon
 
 CEGYPT_CONTIGS = ["Contig"+str(x) for x in range(0,360)]
 
@@ -52,12 +60,17 @@ LONGEST_AK1_SCAFFOLDS = [
     "Scaffold0056","Scaffold0013"
 ]
 
+
+################################################################################
+######### Preprocessing of the first Novogene assembly called EGYPTREF #########
+################################################################################
+
 # Writing the scaffolds of the Egyptian genome to separate fasta files because
 # processing the whole assembly often takes too much time
 rule write_scaffold_fastas:
     input: "data/pilon.fasta"
     output: expand("seq_EGYPTREF/Homo_sapiens.EGYPTREF.dna.{scaffold}.fa", \
-                   scaffold=EGYPT_SCAFFOLDS)
+                   scaffold=EGYPTREF_SCAFFOLDS)
     run:
         with open(input[0], "r") as f_in:
             i = 0
@@ -99,6 +112,42 @@ rule combine_contigs_to_primary_assembly:
     output: "seq_CEGYPTREF/Homo_sapiens.CEGYPTREF.dna.primary_assembly.fa"
     shell: "cat {input} > {output}"
 
+# Copy the assembled sequence
+rule cp_and_rename_assembly:
+    input: "data/pilon.fasta"
+    output: "seq_EGYPTREF/Homo_sapiens.EGYPTREF.dna.primary_assembly.fa"
+    shell: "cp {input} {output}"
+
+
+################################################################################
+####### Preprocessing of the second Novogene assembly called EGYPTREFV2 ########
+################################################################################
+
+# Writing the scaffolds of the Egyptian genome to separate fasta files because
+# processing the whole assembly often takes too much time
+rule write_scaffold_fastas_v2:
+    input: "data/pilon_v2.fasta"
+    output: expand("seq_EGYPTREFV2/Homo_sapiens.EGYPTREFV2.dna.{scaffold}.fa", \
+                   scaffold=EGYPTREFV2_SCAFFOLDS)
+    run:
+        with open(input[0], "r") as f_in:
+            i = 0
+            for record in SeqIO.parse(f_in,"fasta"):            
+                with open(output[i], "w") as f_out:
+                    SeqIO.write(record, f_out, "fasta")
+                    i += 1
+
+# Copy the assembled sequence
+rule cp_and_rename_assembly_v2:
+    input: "data/pilon_v2.fasta"
+    output: "seq_EGYPTREFV2/Homo_sapiens.EGYPTREFV2.dna.primary_assembly.fa"
+    shell: "cp {input} {output}"
+
+
+################################################################################
+############### Computing some statistics for all assemblies ###################
+################################################################################
+
 # Just getting the header lines of the individual sequences in the fasta
 rule scaffold_names:
     input: "seq_{assembly}/{fname}.fa"
@@ -127,7 +176,7 @@ rule compute_assembly_stats:
 rule compute_content_and_assembly_numbers:
     input: expand( \
            "results/{assembly}/{task}_Homo_sapiens.{assembly}.dna.primary_assembly.txt", \
-           assembly = ["GRCh38","EGYPTREF","AK1","YORUBA","CEGYPTREF"], \
+           assembly = ["GRCh38","EGYPTREF","AK1","YORUBA","CEGYPTREF","EGYPTREFV2"], \
            task = ["scaffold_names","num_bases","num_all","assembly_stats"])
 
 
@@ -196,14 +245,14 @@ rule run_busco_primary_assembly:
 # ... and running busco chromosome or scaffold-wise
 rule run_busco_chromosomewise:
     input: expand("busco_EGYPTREF/run_busco_EGYPTREF_{scaffolds}/short_summary_busco_EGYPTREF_{scaffolds}.txt", \
-                  scaffolds=EGYPT_SCAFFOLDS),
+                  scaffolds=EGYPTREF_SCAFFOLDS),
            expand("busco_GRCh38/run_busco_GRCh38_{chrom}/short_summary_busco_GRCh38_{chrom}.txt", \
                   chrom=CHR_GRCh38)
 
 # Make a comparison table for the busco analysis for EGYPTREF
 rule summary_busco_egyptref:
     input: expand("busco_EGYPTREF/run_busco_EGYPTREF_{scaffolds}/full_table_busco_EGYPTREF_{scaffolds}.tsv", \
-                  scaffolds=EGYPT_SCAFFOLDS)
+                  scaffolds=EGYPTREF_SCAFFOLDS)
     output: "busco_EGYPTREF/busco_summary.txt"
     script: "scripts/busco_summary.py"
 
@@ -254,12 +303,6 @@ rule uncompress_fasta:
     resources: io=1
     shell: "gzip -cdk {input} > {output}"
 
-# Copy the assembled sequence
-rule cp_and_rename_assembly:
-    input: "data/pilon.fasta"
-    output: "seq_EGYPTREF/Homo_sapiens.EGYPTREF.dna.primary_assembly.fa"
-    shell: "cp {input} {output}"
-
 
 ################################################################################
 #### Getting the genome assembly (only chromosomes) of a Yoruba individual #####
@@ -305,7 +348,7 @@ rule yoruba_primary_assembly:
 
 
 ################################################################################
-#### Getting the genome assembly (all scaffolds) of a Korean individual ########": "
+#### Getting the genome assembly (all scaffolds) of a Korean individual ########
 ################################################################################
 
 # Getting the assembly report
@@ -404,7 +447,7 @@ rule run_repeatmasker_chromosomewise:
     input: expand("repeatmasked_GRCh38/Homo_sapiens.GRCh38.dna.{x}.fa.tbl", \
                   x=CHR_GRCh38),
            expand("repeatmasked_EGYPTREF/Homo_sapiens.EGYPTREF.dna.{x}.fa.tbl", \
-                  x=EGYPT_SCAFFOLDS),
+                  x=EGYPTREF_SCAFFOLDS),
            expand("repeatmasked_AK1/Homo_sapiens.AK1.dna.{x}.fa.tbl", \
                   x=AK1_SCAFFOLDS),
            expand("repeatmasked_YORUBA/Homo_sapiens.YORUBA.dna.{x}.fa.tbl", \
@@ -413,7 +456,7 @@ rule run_repeatmasker_chromosomewise:
 # Summarising the chromosome-wise repeatmasker summary files for Egyptref
 rule repeatmasker_summary_table_egyptref:
     input: expand("repeatmasked_EGYPTREF/Homo_sapiens.EGYPTREF.dna.{x}.fa.tbl", \
-                  x=EGYPT_SCAFFOLDS)
+                  x=EGYPTREF_SCAFFOLDS)
     output: "repeatmasked_EGYPTREF/summary.txt"
     script: "scripts/repeatmasker_summary.py"
 
@@ -422,6 +465,13 @@ rule repeatmasker_summary_table_cegyptref:
     input: expand("repeatmasked_CEGYPTREF/Homo_sapiens.CEGYPTREF.dna.{x}.fa.tbl", \
                   x=CEGYPT_CONTIGS)
     output: "repeatmasked_CEGYPTREF/summary.txt"
+    script: "scripts/repeatmasker_summary.py"
+
+# Summarising the scaffold-wise repeatmasker summary files for Egyptrefv2
+rule repeatmasker_summary_table_egyptrefv2:
+    input: expand("repeatmasked_EGYPTREFV2/Homo_sapiens.EGYPTREFV2.dna.{x}.fa.tbl", \
+                  x=EGYPTREFV2_SCAFFOLDS)
+    output: "repeatmasked_EGYPTREFV2/summary.txt"
     script: "scripts/repeatmasker_summary.py"
 
 # Summarising the chromosome-wise repeatmasker summary files for GRCh38
@@ -449,7 +499,7 @@ rule repeatmasker_summary_table_yoruba:
 # one line for GRCh38
 rule comparison_repeatmasker:
     input: expand("repeatmasked_{assembly}/summary.txt", \
-                  assembly=["EGYPTREF","CEGYPTREF","AK1","YORUBA","GRCh38"])
+                  assembly=["EGYPTREF","EGYPTREFV2","CEGYPTREF","AK1","YORUBA","GRCh38"])
     output: "results/repeatmasker_comparison.txt"
     script: "scripts/repeatmasker_comparison.py"
 
@@ -525,7 +575,7 @@ rule dotplots_scaffold_vs_chromosomes:
 # Plotting the dotplots for all scaffolds
 rule dotplots_scaffold_vs_chromosomes_all:
     input: #expand("align_lastz_GRCh38_vs_EGYPTREF/dotplots/{scaffold}.pdf", \
-            #      scaffold=EGYPT_SCAFFOLDS),
+            #      scaffold=EGYPTREF_SCAFFOLDS),
 #            expand("align_lastz_GRCh38_vs_YORUBA/dotplots/{scaffold}.pdf", \
 #                  scaffold=YORUBA_SCAFFOLDS[:23]),
 #            expand("align_lastz_GRCh38_vs_CEGYPTREF/dotplots/{contig}.pdf", \
@@ -536,7 +586,7 @@ rule dotplots_scaffold_vs_chromosomes_all:
 # All versus all comparisons of reference and Egyptian genome
 rule align_all_vs_all:
     input: expand("align_lastz_GRCh38_vs_EGYPTREF/{chr}_vs_{scaffold}.maf", \
-                  chr=CHR_GRCh38, scaffold=EGYPT_SCAFFOLDS)
+                  chr=CHR_GRCh38, scaffold=EGYPTREF_SCAFFOLDS)
 
 # Computing the GRCh38 recovery rate using the mafTools package 
 # (as in Cho et al.). Using mafTools program mafPairCoverage, it is necessary
@@ -544,7 +594,7 @@ rule align_all_vs_all:
 # mafTransitiveClosure
 rule combine_maf_files_for_recovery:
     input: expand("align_lastz_GRCh38_vs_EGYPTREF/{{chr}}_vs_{scaffold}.maf", \
-                   scaffold=EGYPT_SCAFFOLDS)
+                   scaffold=EGYPTREF_SCAFFOLDS)
     output: "align_lastz_GRCh38_vs_EGYPTREF/recovery/{chr}_alignments.maf"
     run: 
         shell("cat {input[0]} > {output}")
@@ -606,7 +656,7 @@ rule plot_mummer:
 # All versus all comparisons of reference and Egyptian genome
 rule align_all_vs_all_mummer:
     input: expand("align_mummer_GRCh38_vs_EGYPTREF/{chr}_vs_{scaffold}.delta", \
-                  chr=CHR_GRCh38, scaffold=EGYPT_SCAFFOLDS)
+                  chr=CHR_GRCh38, scaffold=EGYPTREF_SCAFFOLDS)
 
 # Comparing the entire GRCh38 assembly with the entire EGYPTREF assembly
 # --mum:         Use anchor matches that are unique in both the reference and 
@@ -627,17 +677,17 @@ rule align_assemblies_with_mummer:
 
 rule align_assemblies_with_mummer_all:
     input: expand("align_mummer_GRCh38_vs_{a}/assemblies/GRCh38_vs_{a}.delta", \
-                   a=["EGYPTREF","CEGYPTREF","AK1","YORUBA","GRCh38"])
+                   a=["EGYPTREF","CEGYPTREF","EGYPTREFV2","AK1","YORUBA","GRCh38"])
 
 # All versus all dotplots of reference and Egyptian genome
 rule all_vs_all_dotplots_mummer:
     input: expand("align_mummer_GRCh38_vs_EGYPTREF/dotplots/{chr}_vs_{scaffold}.gp", \
-                  chr=CHR_GRCh38, scaffold=EGYPT_SCAFFOLDS)
+                  chr=CHR_GRCh38, scaffold=EGYPTREF_SCAFFOLDS)
 
 # Plotting the dotplots for all scaffolds
 rule mummer_dotplots_scaffold_vs_chromosomes_all:
     input: expand("align_lastz_GRCh38_vs_EGYPTREF/dotplots/{scaffold}.pdf", \
-                  scaffold=EGYPT_SCAFFOLDS)
+                  scaffold=EGYPTREF_SCAFFOLDS)
 
 # Filtering the mummer alignments: Query sequences can be mapped to reference 
 # sequences with -q, this allows the user to exclude chance and repeat 
@@ -789,6 +839,7 @@ rule run_fastqc_all:
 ################################################################################
 ################### SNP Calling for 10 Egyptian individuals ####################
 #################### (one the reference genome individual) #####################
+################################################################################
 
 # If possible, the variant calling (vc) tasks are performed with 24 threads and
 # with 80Gb of memory, such that 2 tasks can be run on a node in parallel;
@@ -1357,7 +1408,7 @@ rule assembl_with_wtdbg2:
                            " -t 48 " + \
                            " -g 3g " + \
                            " -L 10000 " + \
-                           " -S 10 " + \
+#                           " -S 6 " + \
                            " -o {params.out_base} "
 
 # WTPOA-CNS: Consensuser for wtdbg using PO-MSA
