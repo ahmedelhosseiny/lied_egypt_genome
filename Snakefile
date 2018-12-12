@@ -60,6 +60,9 @@ LONGEST_AK1_SCAFFOLDS = [
     "Scaffold0056","Scaffold0013"
 ]
 
+LONGEST_EGYPTREFV2_SCAFFOLDS = ["fragScaff_scaffold_"+str(x)+"_pilon" for x in \
+    [100,170,6,123,149,184,89,195,205,163,201,76,155,29,68,137,80,61,154,147, \
+     116,212,196,158,9,26,186,194,98]] + ["original_scaffold_1041_pilon"]
 
 ################################################################################
 ######### Preprocessing of the first Novogene assembly called EGYPTREF #########
@@ -567,21 +570,25 @@ rule align_with_lastz:
 
 # Plotting for one scaffold the dotplot versus all chromosomes
 rule dotplots_scaffold_vs_chromosomes:
-    input: expand("align_lastz_GRCh38_vs_{{assembly}}/dotplots/{chr}_vs_{{scaffold}}.rdotplot", \
+    input: "results/GRCh38/num_bases_Homo_sapiens.GRCh38.dna.primary_assembly.txt",
+           "results/{assembly}/num_bases_Homo_sapiens.{assembly}.dna.primary_assembly.txt",
+           expand("align_lastz_GRCh38_vs_{{assembly}}/dotplots/{chr}_vs_{{scaffold}}.rdotplot", \
                   chr=CHR_GRCh38)
     output: "align_lastz_GRCh38_vs_{assembly}/dotplots/{scaffold}.pdf"
     script: "scripts/scaffold_vs_grch38.R"            
 
 # Plotting the dotplots for all scaffolds
 rule dotplots_scaffold_vs_chromosomes_all:
-    input: #expand("align_lastz_GRCh38_vs_EGYPTREF/dotplots/{scaffold}.pdf", \
-            #      scaffold=EGYPTREF_SCAFFOLDS),
+    input: expand("align_lastz_GRCh38_vs_EGYPTREF/dotplots/{scaffold}.pdf", \
+                  scaffold=EGYPTREF_SCAFFOLDS),
 #            expand("align_lastz_GRCh38_vs_YORUBA/dotplots/{scaffold}.pdf", \
 #                  scaffold=YORUBA_SCAFFOLDS[:23]),
-#            expand("align_lastz_GRCh38_vs_CEGYPTREF/dotplots/{contig}.pdf", \
-#                  contig=CEGYPT_CONTIGS),
-            expand("align_lastz_GRCh38_vs_AK1/dotplots/{scaffold}.pdf", \
-                   scaffold=LONGEST_AK1_SCAFFOLDS)
+            expand("align_lastz_GRCh38_vs_CEGYPTREF/dotplots/{contig}.pdf", \
+                  contig=CEGYPT_CONTIGS)#,
+#            expand("align_lastz_GRCh38_vs_AK1/dotplots/{scaffold}.pdf", \
+#                   scaffold=LONGEST_AK1_SCAFFOLDS),
+#            expand("align_lastz_GRCh38_vs_EGYPTREFV2/dotplots/{scaffold}.pdf", \
+#                   scaffold=LONGEST_EGYPTREFV2_SCAFFOLDS)
 
 # All versus all comparisons of reference and Egyptian genome
 rule align_all_vs_all:
