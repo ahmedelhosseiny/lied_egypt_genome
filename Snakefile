@@ -6,7 +6,7 @@
 
 from Bio import SeqIO
 import os
-
+import gzip
 
 # Rules to be executed for new assemblies: compute_content_and_assembly_numbers,
 # repeatmasker_summary_table_egyptrefv2, align_assemblies_with_mummer_all, 
@@ -877,7 +877,7 @@ EGYPT_SAMPLES_TO_PREPLANES = {
                  "NDHG02363_H75HVDMXX_L2", "NDHG02363_H75TCDMXX_L2", \
                  "NDHG02363_H75FVDMXX_L1", "NDHG02363_H75FVDMXX_L2"],
     "LU19":     ["NDHG02358_H7777DMXX_L1", "NDHG02358_H7777DMXX_L2"],
-    "LU2":      ["NDHG02365_H75FVDMXX_L1", "NDHG02365_H75FVDMXX_L1"],
+    "LU2":      ["NDHG02365_H75FVDMXX_L1", "NDHG02365_H75FVDMXX_L2"],
     "LU22":     ["NDHG02364_H75LLDMXX_L1", "NDHG02364_H75LLDMXX_L2"],
     "LU23":     ["NDHG02366_H75FVDMXX_L1", "NDHG02366_H75FVDMXX_L2"],
     "LU9":      ["NDHG02362_H772LDMXX_L1", "NDHG02362_H772LDMXX_L2"],
@@ -887,10 +887,36 @@ EGYPT_SAMPLES_TO_PREPLANES = {
 #    "TEST":     ["PROTOCOL_SEQUENCER_L1", "PROTOCOL_SEQUENCER_L2"] # the last is for testing purposes
 }
 
+EGYPT_FASTQ = []
+for s in EGYPT_SAMPLES:
+    for l in EGYPT_SAMPLES_TO_PREPLANES[s]:
+        EGYPT_FASTQ += ["data/raw_data/"+s+"/"+s+"_"+l+"_1.fq.gz"]
+print(EGYPT_FASTQ)
+
 # Symlinking the raw data directory
 rule symlink_data_for_variant_detection:
     output: directory("data/raw_data")
     shell: "ln -s /data/lied_egypt_genome/raw_data {output}"
+
+# Listing the information obtained from the read name; this information can be
+# used to group files that belong to the same sequencing run and is needed
+# as read group information for Matthias variant calling pipeline
+rule get_readname_egyptians:
+    input: EGYPT_FASTQ
+    output: "illumina_qc/readinfo.txt"
+    run:
+        with open(output[0],"w") as f_out:
+            f_out.write("\t".join(["file","readname","instrument","run",\
+                                   "flowcell","lane","tile","x","y","mate",\
+                                   "filtered","control","index"])+"\n")
+            for file in input:
+                with gzip.open(file,"rb") as f_in:
+                    for line in f_in:
+                        line = line.decode().strip()
+                        s = line.split(":")
+                        readinfo = "\t".join(s[:6]+s[6].split(" ")+s[7:])
+                        f_out.write(file+"\t"+line+"\t"+readinfo+"\n")
+                        break
 
 # Getting the latest dbsnp version for GRCh38, this is version 151; I am 
 # getting the VCF file deposited under GATK, which is very slightly larger than
