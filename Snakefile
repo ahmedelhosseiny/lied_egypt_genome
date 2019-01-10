@@ -29,6 +29,13 @@ EGYPTREFV2_SCAFFOLDS = ["fragScaff_scaffold_"+str(x)+"_pilon" for x in range(0,2
 
 CEGYPT_CONTIGS = ["Contig"+str(x) for x in range(0,360)]
 
+# Read in contig names from pre-generated file which reads in the fasta headers
+CEGYPTV2_CONTIGS = []
+with open("data/file.contigsetv2.seqnames.txt","r") as f_in:
+    for line in f_in:
+        # Remove ">" at start and "|arrow" at end
+        CEGYPTV2_CONTIGS.append(line.split("|")[0][1:])
+
 CHR_YORUBA = [x for x in CHR_GRCh38 if not x in ["chromosome.MT","chromosome.Y"]]
 
 YORUBA_SCAFFOLDS = []
@@ -140,6 +147,39 @@ rule write_scaffold_fastas_v2:
                     SeqIO.write(record, f_out, "fasta")
                     i += 1
 
+# Writing the contigs of the Egyptian genome to separate fasta files because
+# processing the whole assembly often takes too much time
+rule write_contig_fastas_v2:
+    input: "data/file.contigsetv2.fasta"
+    output: expand("seq_CEGYPTREFV2/Homo_sapiens.CEGYPTREFV2.dna.{contig}.fa", \
+                   contig=CEGYPTV2_CONTIGS)
+    run:
+        with open(input[0], "r") as f_in:
+            for record in SeqIO.parse(f_in,"fasta"):            
+                # Remove the trailing "|arrow" since pipe symbols can cause
+                # problems and the "|arrow" is not needed
+                record.id = record.id[:-6]
+                record.name = ''
+                record.description = ''
+                record.seq = record.seq.upper()
+                out_fname = "seq_CEGYPTREFV2/Homo_sapiens.CEGYPTREFV2.dna." + \
+                               record.id+".fa"
+                with open(out_fname, "w") as f_out:
+                    SeqIO.write(record, f_out, "fasta")
+
+# Making a file with all contigs; this is the same as the 
+# data/file.contigsetv2.fastafile provided by Novogene, but the "|arrow" in the
+# sequence names removed
+# Note: The original contig file has upper and lower-case letters, don't know
+# why! Perhaps repeatmasking was done with them? Anyway, I convert the sequences
+# to upper case, because repeatmasking is done later and should be as for the 
+# other assemblies
+rule combine_contigs_to_primary_assembly_v2:
+    input: expand("seq_CEGYPTREFV2/Homo_sapiens.CEGYPTREFV2.dna.{contig}.fa", \
+                   contig=CEGYPTV2_CONTIGS)
+    output: "seq_CEGYPTREFV2/Homo_sapiens.CEGYPTREFV2.dna.primary_assembly.fa"
+    shell: "cat {input} > {output}"
+
 # Copy the assembled sequence
 rule cp_and_rename_assembly_v2:
     input: "data/pilon_v2.fasta"
@@ -179,7 +219,7 @@ rule compute_assembly_stats:
 rule compute_content_and_assembly_numbers:
     input: expand( \
            "results/{assembly}/{task}_Homo_sapiens.{assembly}.dna.primary_assembly.txt", \
-           assembly = ["GRCh38","EGYPTREF","AK1","YORUBA","CEGYPTREF","EGYPTREFV2"], \
+           assembly = ["GRCh38","EGYPTREF","AK1","YORUBA","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"], \
            task = ["scaffold_names","num_bases","num_all","assembly_stats"])
 
 
@@ -502,7 +542,7 @@ rule repeatmasker_summary_table_yoruba:
 # one line for GRCh38
 rule comparison_repeatmasker:
     input: expand("repeatmasked_{assembly}/summary.txt", \
-                  assembly=["EGYPTREF","EGYPTREFV2","CEGYPTREF","AK1","YORUBA","GRCh38"])
+                  assembly=["EGYPTREF","EGYPTREFV2","CEGYPTREF","CEGYPTREFV2","AK1","YORUBA","GRCh38"])
     output: "results/repeatmasker_comparison.txt"
     script: "scripts/repeatmasker_comparison.py"
 
@@ -583,12 +623,14 @@ rule dotplots_scaffold_vs_chromosomes_all:
                   scaffold=EGYPTREF_SCAFFOLDS),
 #            expand("align_lastz_GRCh38_vs_YORUBA/dotplots/{scaffold}.pdf", \
 #                  scaffold=YORUBA_SCAFFOLDS[:23]),
-            expand("align_lastz_GRCh38_vs_CEGYPTREF/dotplots/{contig}.pdf", \
-                  contig=CEGYPT_CONTIGS)#,
+#            expand("align_lastz_GRCh38_vs_CEGYPTREF/dotplots/{contig}.pdf", \
+#                  contig=CEGYPT_CONTIGS),
 #            expand("align_lastz_GRCh38_vs_AK1/dotplots/{scaffold}.pdf", \
 #                   scaffold=LONGEST_AK1_SCAFFOLDS),
 #            expand("align_lastz_GRCh38_vs_EGYPTREFV2/dotplots/{scaffold}.pdf", \
-#                   scaffold=LONGEST_EGYPTREFV2_SCAFFOLDS)
+#                   scaffold=LONGEST_EGYPTREFV2_SCAFFOLDS),
+            expand("align_lastz_GRCh38_vs_CEGYPTREFV2/dotplots/{contig}.pdf", \
+                   contig=CEGYPTV2_CONTIGS)
 
 # All versus all comparisons of reference and Egyptian genome
 rule align_all_vs_all:
@@ -684,7 +726,7 @@ rule align_assemblies_with_mummer:
 
 rule align_assemblies_with_mummer_all:
     input: expand("align_mummer_GRCh38_vs_{a}/assemblies/GRCh38_vs_{a}.delta", \
-                   a=["EGYPTREF","CEGYPTREF","EGYPTREFV2","AK1","YORUBA","GRCh38"])
+                   a=["EGYPTREF","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2","AK1","YORUBA","GRCh38"])
 
 # All versus all dotplots of reference and Egyptian genome
 rule all_vs_all_dotplots_mummer:
@@ -891,7 +933,6 @@ EGYPT_FASTQ = []
 for s in EGYPT_SAMPLES:
     for l in EGYPT_SAMPLES_TO_PREPLANES[s]:
         EGYPT_FASTQ += ["data/raw_data/"+s+"/"+s+"_"+l+"_1.fq.gz"]
-print(EGYPT_FASTQ)
 
 # Symlinking the raw data directory
 rule symlink_data_for_variant_detection:

@@ -14,7 +14,7 @@ fi
 source activate workflow_lied_egypt_genome
 
 echo "RUNNING SNAKEMAKE WORKFLOW..."
-snakemake --reason --rerun-incomplete -k -j 50 --resources io=4 --use-conda --jobname "{jobid}.{rulename}.sh" --cluster "sbatch --mem 24G --partition=longterm --time 3-00:00:00 -c 6 -o log/%j.{rule}.log" --printshellcmds dotplots_scaffold_vs_chromosomes_all
+snakemake -n --reason --rerun-incomplete -k -j 50 --resources io=4 --use-conda --jobname "{jobid}.{rulename}.sh" --cluster "sbatch --mem 8G --partition=debug --time 3-00:00:00 -c 4 -o log/%j.{rule}.log" --printshellcmds compute_content_and_assembly_numbers #align_assemblies_with_mummer_all comparison_repeatmasker # dotplots_scaffold_vs_chromosomes_all
 
 source deactivate
 conda list -n workflow_lied_egypt_genome --export > environment_versions.yaml
