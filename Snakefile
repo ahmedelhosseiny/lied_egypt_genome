@@ -216,6 +216,7 @@ rule compute_assembly_stats:
     script: "scripts/compute_assembly_stats.py"
 
 # Computing all info numbers:
+# assembly = ["GRCh38","EGYPTREF","AK1","YORUBA","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"], \
 rule compute_content_and_assembly_numbers:
     input: expand( \
            "results/{assembly}/{task}_Homo_sapiens.{assembly}.dna.primary_assembly.txt", \
@@ -459,19 +460,26 @@ rule run_repeatmasker:
             "repeatmasked_{assembly}/Homo_sapiens.{assembly}.dna.{chr_or_type}.fa.tbl"
     threads: 12
     conda: "envs/repeatmasker.yaml"
-    shell: "workdir=$PWD; cd /scratch; " + \
-           "rm -rf /scratch/repeatmasked_{wildcards.assembly}_{wildcards.chr_or_type}; " + \
-           "mkdir -p /scratch/repeatmasked_{wildcards.assembly}_{wildcards.chr_or_type}; " + \
-           "RepeatMasker -species human " + \
-           "             -dir /scratch/repeatmasked_{wildcards.assembly}_{wildcards.chr_or_type} " + \
+    shell: "RepeatMasker -species human " + \
+           "             -dir repeatmasked_{wildcards.assembly} " + \
            "             -pa 12 " + \
            "             -xsmall " + \
            "             -q " + \
            "             -html " + \
-           "             -gff $workdir/{input}; " + \
-           "cd $workdir; "
-           "rsync -avz /scratch/repeatmasked_{wildcards.assembly}_{wildcards.chr_or_type}/ repeatmasked_{wildcards.assembly}/; " + \
-           "rm -rf /scratch/repeatmasked_{wildcards.assembly}_{wildcards.chr_or_type}; "
+           "             -gff {input}; " #+ \
+#           "workdir=$PWD; cd /scratch; " + \
+#           "rm -rf /scratch/repeatmasked_{wildcards.assembly}_{wildcards.chr_or_type}; " + \
+#           "mkdir -p /scratch/repeatmasked_{wildcards.assembly}_{wildcards.chr_or_type}; " + \
+#           "RepeatMasker -species human " + \
+#           "             -dir /scratch/repeatmasked_{wildcards.assembly}_{wildcards.chr_or_type} " + \
+#           "             -pa 12 " + \
+#           "             -xsmall " + \
+#           "             -q " + \
+#           "             -html " + \
+#           "             -gff $workdir/{input}; " + \
+#           "cd $workdir; "
+#           "rsync -avz /scratch/repeatmasked_{wildcards.assembly}_{wildcards.chr_or_type}/ repeatmasked_{wildcards.assembly}/; " + \
+#           "rm -rf /scratch/repeatmasked_{wildcards.assembly}_{wildcards.chr_or_type}; "
 
 # Running repeatmasker on the primary assembly ...
 rule run_repeatmasker_primary_assembly:
@@ -486,6 +494,7 @@ rule run_repeatmasker_primary_assembly:
 # AK1: Scaffold1437, Scaffold0873, Scaffold2568, Scaffold2697, Scaffold2245
 # Yoruba: HS_LKPB_CHRUN_SCAFFOLD_{256,672,296,980,165,472,1137,1147,1547,1411,
 #         1355,1638,1014}
+# EGYPTREFV2: 
 rule run_repeatmasker_chromosomewise:
     input: expand("repeatmasked_GRCh38/Homo_sapiens.GRCh38.dna.{x}.fa.tbl", \
                   x=CHR_GRCh38),
@@ -515,6 +524,13 @@ rule repeatmasker_summary_table_egyptrefv2:
     input: expand("repeatmasked_EGYPTREFV2/Homo_sapiens.EGYPTREFV2.dna.{x}.fa.tbl", \
                   x=EGYPTREFV2_SCAFFOLDS)
     output: "repeatmasked_EGYPTREFV2/summary.txt"
+    script: "scripts/repeatmasker_summary.py"
+
+# Summarising the contig-wise repeatmasker summary files for Egyptrefv2
+rule repeatmasker_summary_table_cegyptrefv2:
+    input: expand("repeatmasked_CEGYPTREFV2/Homo_sapiens.CEGYPTREFV2.dna.{x}.fa.tbl", \
+                  x=CEGYPTV2_CONTIGS)
+    output: "repeatmasked_CEGYPTREFV2/summary.txt"
     script: "scripts/repeatmasker_summary.py"
 
 # Summarising the chromosome-wise repeatmasker summary files for GRCh38
@@ -621,16 +637,16 @@ rule dotplots_scaffold_vs_chromosomes:
 rule dotplots_scaffold_vs_chromosomes_all:
     input: expand("align_lastz_GRCh38_vs_EGYPTREF/dotplots/{scaffold}.pdf", \
                   scaffold=EGYPTREF_SCAFFOLDS),
-#            expand("align_lastz_GRCh38_vs_YORUBA/dotplots/{scaffold}.pdf", \
-#                  scaffold=YORUBA_SCAFFOLDS[:23]),
-#            expand("align_lastz_GRCh38_vs_CEGYPTREF/dotplots/{contig}.pdf", \
-#                  contig=CEGYPT_CONTIGS),
-#            expand("align_lastz_GRCh38_vs_AK1/dotplots/{scaffold}.pdf", \
-#                   scaffold=LONGEST_AK1_SCAFFOLDS),
-#            expand("align_lastz_GRCh38_vs_EGYPTREFV2/dotplots/{scaffold}.pdf", \
-#                   scaffold=LONGEST_EGYPTREFV2_SCAFFOLDS),
+            expand("align_lastz_GRCh38_vs_YORUBA/dotplots/{scaffold}.pdf", \
+                  scaffold=YORUBA_SCAFFOLDS[:23]),
+            expand("align_lastz_GRCh38_vs_CEGYPTREF/dotplots/{contig}.pdf", \
+                  contig=CEGYPT_CONTIGS),
+            expand("align_lastz_GRCh38_vs_AK1/dotplots/{scaffold}.pdf", \
+                   scaffold=LONGEST_AK1_SCAFFOLDS),
+            expand("align_lastz_GRCh38_vs_EGYPTREFV2/dotplots/{scaffold}.pdf", \
+                   scaffold=LONGEST_EGYPTREFV2_SCAFFOLDS),
             expand("align_lastz_GRCh38_vs_CEGYPTREFV2/dotplots/{contig}.pdf", \
-                   contig=CEGYPTV2_CONTIGS)
+                   contig=CEGYPTV2_CONTIGS[:50])
 
 # All versus all comparisons of reference and Egyptian genome
 rule align_all_vs_all:
@@ -726,7 +742,7 @@ rule align_assemblies_with_mummer:
 
 rule align_assemblies_with_mummer_all:
     input: expand("align_mummer_GRCh38_vs_{a}/assemblies/GRCh38_vs_{a}.delta", \
-                   a=["EGYPTREF","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2","AK1","YORUBA","GRCh38"])
+                   a=["EGYPTREF","CEGYPTREF","EGYPTREFV2","AK1","YORUBA","GRCh38"])
 
 # All versus all dotplots of reference and Egyptian genome
 rule all_vs_all_dotplots_mummer:

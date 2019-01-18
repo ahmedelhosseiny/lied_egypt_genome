@@ -1,0 +1,85 @@
+#kate:syntax python;
+
+from global_variables import *
+
+
+################################################################################
+########### Reference to assembly genome alignment with nucmer #################
+################################################################################
+
+# Genome alignments using mummer4
+# Comparing the entire GRCh38 assembly with the entire EGYPTREF assembly
+# --mum:         Use anchor matches that are unique in both the reference and 
+#                query (false)
+# --threads=NUM: Use NUM threads (# of cores)
+# Path to conda environment:
+# /scratch/node25_genome_alignment/.snakemake/conda/1d58cf3a/bin
+rule align_assemblies_with_nucmer:
+    input: ref="seq_{a1}/Homo_sapiens.{a1}.dna.primary_assembly.fa",
+           query="seq_{a2}/Homo_sapiens.{a2}.dna.primary_assembly.fa"
+    output: "align_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.delta"
+    conda: "envs/mummer.yaml"
+    shell: "nucmer " + \
+           "--mum " + \
+           "--threads=32 "
+           "-p align_nucmer_{wildcards.a1}_vs_{wildcards.a2}/{wildcards.a1}_vs_{wildcards.a2} " + \
+           "{input[0]} {input[1]}"
+
+rule align_assemblies_with_nucmer_all:
+    input: expand("align_nucmer_GRCh38_vs_{a}/GRCh38_vs_{a}.delta", \
+                   a=["EGYPTREF","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2","AK1","YORUBA","GRCh38"])
+
+# Tiling: Attempts to construct a tiling path out of the query contigs as mapped
+# to the reference sequences
+# Columns: start ref, end ref, gap between contig and next, length contig, 
+# alignment coverage of contig, average percent identiy, orientation of contig, 
+# contig id
+rule show_tiling:
+    input: "align_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.delta"
+    output: "align_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.tiling"
+    conda: "envs/mummer.yaml"
+    shell: "show-tiling {input} > {output} "
+
+# Showing coordinates of alignments
+rule show_coords:
+    input: "align_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.delta"
+    output: "align_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.coords"
+    conda: "envs/mummer.yaml"
+    shell: "show-coords {input} > {output} "
+
+# Plotting the tiling path
+rule mummerplot:
+    input: "align_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.tiling"
+    output: "align_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.gp"
+    conda: "envs/mummer.yaml"
+    shell: "mummerplot " + \ 
+           "-p align_nucmer_{wildcards.a1}_vs_{wildcards.a2}/{wildcards.a1}_vs_{wildcards.a2} " + \
+           "{input} "
+
+# Running the tool nucdiff to compare two assemblies based on alignment with 
+# mummer, which is also performed by the nucdiff tool
+rule run_nucdiff_for_assembly:
+    input: ref="seq_{a1}/Homo_sapiens.{a1}.dna.primary_assembly.fa", \
+           query="seq_{a2}/Homo_sapiens.{a2}.dna.primary_assembly.fa", \
+           delta="align_mummer_{a1}_vs_{a2}/assemblies/{a1}_vs_{a2}.delta"
+    output: "nucdiff_{a1}_vs_{a2}/{a1}_vs_{a2}_ref_snps.gff", \
+            "nucdiff_{a1}_vs_{a2}/{a1}_vs_{a2}_ref_struct.gff", \
+            "nucdiff_{a1}_vs_{a2}/{a1}_vs_{a2}_ref_blocks.gff", \
+            "nucdiff_{a1}_vs_{a2}/{a1}_vs_{a2}_ref_snps.vcf", \
+            "nucdiff_{a1}_vs_{a2}/{a1}_vs_{a2}_query_snps.gff", \
+            "nucdiff_{a1}_vs_{a2}/{a1}_vs_{a2}_query_struct.gff", \
+            "nucdiff_{a1}_vs_{a2}/{a1}_vs_{a2}_query_blocks.gff", \
+            "nucdiff_{a1}_vs_{a2}/{a1}_vs_{a2}_query_snps.vcf", \
+            "nucdiff_{a1}_vs_{a2}/{a1}_vs_{a2}_stat.out"
+    params: outdir=lambda wildcards: "nucdiff_"+wildcards.a1+"_vs_"+wildcards.a2
+    conda: "envs/nucdiff.yaml"
+    shell: "nucdiff {input.ref} {input.query} {params.outdir} " + \
+           "{wildcards.a1}_vs_{wildcards.a2} " + \
+           "--vcf yes " + \
+           "--filter_opt '-l 1000 -i 99' " + \
+           "--delta_file {input.delta} " + \
+           "--proc 24"
+
+rule run_nucdiff_all:
+    input: expand("nucdiff_GRCh38_vs_EGYPTREF/GRCh38_vs_EGYPTREF_stat.out", \
+                  chr=CHR_GRCh38)
