@@ -7,6 +7,48 @@ from global_variables import *
 ########### Reference to assembly genome alignment with nucmer #################
 ################################################################################
 
+rule repeatmasked_primary_grch38:
+    input: expand("repeatmasked_GRCh38/Homo_sapiens.GRCh38.dna.{chrom}.fa.masked", \
+                   chrom=CHR_GRCh38)
+    output: "repeatmasked_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa"
+    shell: "cat {input} > {output}"
+
+rule repeatmasked_primary_egyptrefv2:
+    input: expand("repeatmasked_EGYPTREFV2/Homo_sapiens.EGYPTREFV2.dna.{scaffold}.fa.masked", \
+                   scaffold=EGYPTREFV2_SCAFFOLDS)
+    output: "repeatmasked_EGYPTREFV2/Homo_sapiens.EGYPTREFV2.dna.primary_assembly.fa"
+    shell: "cat {input} > {output}"
+
+rule repeatmasked_primary_cegyptrefv2:
+    input: expand("repeatmasked_CEGYPTREFV2/Homo_sapiens.CEGYPTREFV2.dna.{chrom}.fa.masked", \
+                   chrom=CEGYPTV2_CONTIGS)
+    output: "repeatmasked_CEGYPTREFV2/Homo_sapiens.CEGYPTREFV2.dna.primary_assembly.fa"
+    shell: "cat repeatmasked_CEGYPTREFV2/*.fa.masked > {output}"
+
+rule repeatmasked_primary_egyptref:
+    input: expand("repeatmasked_EGYPTREF/Homo_sapiens.EGYPTREF.dna.{scaffold}.fa.masked", \
+                   scaffold=EGYPTREF_SCAFFOLDS)
+    output: "repeatmasked_EGYPTREF/Homo_sapiens.EGYPTREF.dna.primary_assembly.fa"
+    shell: "cat {input} > {output}"
+
+rule repeatmasked_primary_cegyptref:
+    input: expand("repeatmasked_CEGYPTREF/Homo_sapiens.CEGYPTREF.dna.{contig}.fa.masked", \
+                   contig=CEGYPT_CONTIGS)
+    output: "repeatmasked_CEGYPTREF/Homo_sapiens.CEGYPTREF.dna.primary_assembly.fa"
+    shell: "cat {input} > {output}"
+
+rule repeatmasked_primary_yoruba:
+    input: expand("repeatmasked_YORUBA/Homo_sapiens.YORUBA.dna.{scaffold}.fa.masked", \
+                   scaffold=YORUBA_SCAFFOLDS)
+    output: "repeatmasked_YORUBA/Homo_sapiens.YORUBA.dna.primary_assembly.fa"
+    shell: "cat {input} > {output}"
+
+rule repeatmasked_primary_ak1:
+    input: expand("repeatmasked_AK1/Homo_sapiens.AK1.dna.{scaffold}.fa.masked", \
+                   scaffold=AK1_SCAFFOLDS)
+    output: "repeatmasked_AK1/Homo_sapiens.AK1.dna.primary_assembly.fa"
+    shell: "cat {input} > {output}"
+
 # Genome alignments using mummer4
 # Comparing the entire GRCh38 assembly with the entire EGYPTREF assembly
 # --mum:         Use anchor matches that are unique in both the reference and 
@@ -21,8 +63,19 @@ rule align_assemblies_with_nucmer:
     conda: "envs/mummer.yaml"
     shell: "nucmer " + \
            "--mum " + \
-           "--threads=32 "
+           "--threads=32 " + \
            "-p align_nucmer_{wildcards.a1}_vs_{wildcards.a2}/{wildcards.a1}_vs_{wildcards.a2} " + \
+           "{input[0]} {input[1]}"
+
+rule align_repeatmasked_assemblies_with_nucmer:
+    input: ref="repeatmasked_{a1}/Homo_sapiens.{a1}.dna.primary_assembly.fa",
+           query="repeatmasked_{a2}/Homo_sapiens.{a2}.dna.primary_assembly.fa"
+    output: "alignrepeatmasked_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.delta"
+    conda: "envs/mummer.yaml"
+    shell: "nucmer " + \
+           "--mum " + \
+           "--threads=32 " + \
+           "-p alignrepeatmasked_nucmer_{wildcards.a1}_vs_{wildcards.a2}/{wildcards.a1}_vs_{wildcards.a2} " + \
            "{input[0]} {input[1]}"
 
 rule align_assemblies_with_nucmer_all:
@@ -35,26 +88,234 @@ rule align_assemblies_with_nucmer_all:
 # alignment coverage of contig, average percent identiy, orientation of contig, 
 # contig id
 rule show_tiling:
-    input: "align_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.delta"
-    output: "align_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.tiling"
+    input: "{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.delta"
+    output: "{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.tiling"
     conda: "envs/mummer.yaml"
     shell: "show-tiling {input} > {output} "
 
 # Showing coordinates of alignments
 rule show_coords:
-    input: "align_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.delta"
-    output: "align_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.coords"
+    input: "{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.delta"
+    output: "{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.coords"
     conda: "envs/mummer.yaml"
     shell: "show-coords {input} > {output} "
 
-# Plotting the tiling path
+# Plotting the best 1-to-1 mapping
+# OPTIONS:
+#    -b|breaklen     Highlight alignments with breakpoints further than
+#                    breaklen nucleotides from the nearest sequence end
+#    --[no]color     Color plot lines with a percent similarity gradient or
+#                    turn off all plot color (default color by match dir)
+#                    If the plot is very sparse, edit the .gp script to plot
+#                    with 'linespoints' instead of 'lines'
+#    -c
+#    --[no]coverage  Generate a reference coverage plot (default for .tiling)
+#    --depend        Print the dependency information and exit
+#    -f
+#    --filter        Only display .delta alignments which represent the "best"
+#                    hit to any particular spot on either sequence, i.e. a
+#                    one-to-one mapping of reference and query subsequences
+#    -h
+#    --help          Display help information and exit
+#    -l
+#    --layout        Layout a .delta multiplot in an intelligible fashion,
+#                    this option requires the -R -Q options
+#    --fat           Layout sequences using fattest alignment only
+#    -p|prefix       Set the prefix of the output files (default 'out')
+#    -rv             Reverse video for x11 plots
+#    -r|IdR          Plot a particular reference sequence ID on the X-axis
+#    -q|IdQ          Plot a particular query sequence ID on the Y-axis
+#    -R|Rfile        Plot an ordered set of reference sequences from Rfile
+#    -Q|Qfile        Plot an ordered set of query sequences from Qfile
+#                    Rfile/Qfile Can either be the original DNA multi-FastA
+#                    files or lists of sequence IDs, lens and dirs [ /+/-]
+#    -r|rport        Specify the port to send reference ID and position on
+#                    mouse double click in X11 plot window
+#    -q|qport        Specify the port to send query IDs and position on mouse
+#                    double click in X11 plot window
+#    -s|size         Set the output size to small, medium or large
+#                    --small --medium --large (default 'small')
+#    -S
+#    --SNP           Highlight SNP locations in each alignment
+#    -t|terminal     Set the output terminal to x11, postscript or png
+#                    --x11 --postscript --png (default 'x11')
+#    -t|title        Specify the gnuplot plot title (default none)
+#    -x|xrange       Set the xrange for the plot '[min:max]'
+#    -y|yrange       Set the yrange for the plot '[min:max]'
+#    -V
+#    --version       Display the version information and exit
 rule mummerplot:
-    input: "align_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.tiling"
-    output: "align_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.gp"
+    input: "{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.delta",
+           "data/mummerplot_chromosomes.txt"
+    output: "{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.gp"
     conda: "envs/mummer.yaml"
     shell: "mummerplot " + \ 
-           "-p align_nucmer_{wildcards.a1}_vs_{wildcards.a2}/{wildcards.a1}_vs_{wildcards.a2} " + \
-           "{input} "
+           "-p {wildcards.aligntype}_nucmer_{wildcards.a1}_vs_{wildcards.a2}/{wildcards.a1}_vs_{wildcards.a2} " + \
+           "--postscript " + \
+           "--filter " + \
+           "--layout " + \
+           "--medium " + \
+           "-title {wildcards.a2} " + \
+           "-R {input[1]} " + \
+           "{input[0]}; " + \
+           "gnuplot {output}; "
+
+rule mummerplot_all:
+    input: expand("{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.gp", \
+                    aligntype=["align"], \
+                    a1="GRCh38", \
+                    a2=["EGYPTREF","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"] + \
+                       ["YORUBA","AK1","GRCh38"])
+
+rule mummerplot_chromosomewise:
+    input: "{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.delta",
+           "data/mummerplot_chromosomes.txt"
+    output: "{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}_{chrom}.gp"
+    conda: "envs/mummer.yaml"
+    shell: "mummerplot " + \ 
+           "-p {wildcards.aligntype}_nucmer_{wildcards.a1}_vs_{wildcards.a2}/{wildcards.a1}_vs_{wildcards.a2}_{wildcards.chrom} " + \
+           "--postscript " + \
+           "--filter " + \
+           "--layout " + \
+           "--medium " + \
+           "-title {wildcards.a2} " + \
+           "-R {input[1]} " + \
+           "-r {wildcards.chrom} " + \
+           "{input[0]}; " + \
+           "gnuplot {output}; "
+
+ASSEMBLIES = ["CEGYPTREFV2"]
+CHROMOSOMES = [str(x) for x in range(23)]+["X","Y","MT"]
+#"YORUBA", "EGYPTREFV2"
+rule mummerplot_chromosomewise_all:
+    input: expand("{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}_{chrom}.gp", \
+                    aligntype=["align"], \
+                    a1="GRCh38", \
+                    a2=["EGYPTREF","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"] + \
+                       ["YORUBA","AK1","GRCh38"], \
+                    chrom=CHROMOSOMES)
+
+
+################################################################################
+## Extracting various information within specified genes (i.e. gene-centric) ###
+################################################################################
+
+# These are the genes of interest (ABCC7=CFTR, HD=HDDC3?, Factor V=F5)
+GENES = ["CFTR","HDDC3","DMD","BRCA1","BRCA2","TP53","EGFR","APP","PSEN1","F5", \
+         "CARD11","LAMA4","MRC1","USH2A"]
+
+# Therefore, obtain a recent Ensembl annotation file first
+rule get_ensembl_gene_annotation_gtf:
+    output: temp("annotations/Homo_sapiens.GRCh38.94.gtf.gz")
+    shell: "wget -P annotations " + \
+           "ftp://ftp.ensembl.org/pub/release-94/gtf/homo_sapiens/" + \
+           "Homo_sapiens.GRCh38.94.gtf.gz "
+
+rule unzip_ensembl_gene_annotation_gtf:
+    input: "annotations/Homo_sapiens.GRCh38.94.gtf.gz"
+    output: "annotations/Homo_sapiens.GRCh38.94.gtf"
+    shell: "gzip -d {input}"
+
+rule gc_get_gene_annotation:
+    input: "annotations/Homo_sapiens.GRCh38.94.gtf"
+    output: "gene_centric/{gene}/{gene}.gtf"
+    shell: "cat {input} | grep '#' > {output}; " + \
+           "cat {input} | grep 'gene_name \"{wildcards.gene}\";' >> {output}"
+
+# How many bases left and right of gene boundaries to consider 
+WINDOW = {
+    "CFTR": [100000,100000],
+    "HDDC3": [100000,100000],
+    "DMD": [100000,100000],
+    "BRCA1": [100000,100000],
+    "BRCA2": [100000,100000],
+    "TP53": [100000,100000],
+    "EGFR": [100000,100000],
+    "APP": [100000,100000],
+    "PSEN1": [100000,100000],
+    "F5": [100000,100000],
+    "CARD11": [100000,100000],
+    "LAMA4": [100000,100000],
+    "MRC1": [100000,100000],
+    "USH2A": [100000,100000]
+}
+rule gc_get_start_end_position:
+    input: "gene_centric/{gene}/{gene}.gtf"
+    output: "gene_centric/{gene}/{gene}.bed"
+    run:
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            f_out.write("# Custom bed file for region around gene\n")
+            for line in f_in:
+                if line[0] == "#":
+                    continue
+                s = line.split("\t")
+                if s[2] == "gene":
+                    chr = s[0]
+                    start = str(int(s[3]) - WINDOW[wildcards.gene][0])
+                    end = str(int(s[4]) + WINDOW[wildcards.gene][1])
+                    strand = s[6]
+                    f_out.write("\t".join([chr,start,end,'.','.',strand])+"\n")
+
+rule gc_get_overlapping_genes:
+    input: "annotations/Homo_sapiens.GRCh38.94.gtf",
+           "gene_centric/{gene}/{gene}.bed"
+    output: "gene_centric/{gene}/{gene}_overlapping.gtf"
+    run:
+        with open(input[1],"r") as f_in:
+            for line in f_in:
+                if line[0] == "#":
+                    continue
+                s = line.split('\t')
+                [q_chrom,q_start,q_end] = s[:3]
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                if line[0] == "#":
+                    continue
+                s = line.split("\t")
+                chrom,start,end = s[:3]
+                if chrom == q_chrom:
+                    if q_start<start<q_end or q_start<end<q_end:
+                        f_out.write(line)
+
+rule gc_delta_format:
+    input: align="{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.delta",
+           gene="gene_centric/{gene}/{gene}.bed"
+    output: "gene_centric/{gene}/{aligntype}_{gene}_{a1}_vs_{a2}.delta"
+    run:
+        align_write = False
+        check_coords = False
+        with open(input.gene,"r") as f_in:
+            for line in f_in:
+                if line[0] == "#":
+                    continue
+                s = line.split("\t")
+                chrom = s[0]
+                start = int(s[1])
+                end = int(s[2])
+                assert(start<end)
+        with open(input.align,"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                s = line.split(" ")
+                if line[0] == ">":
+                    align_write = False
+                    al_chrom = s[0][1:]
+                    if al_chrom == chrom:
+                        f_out.write(line)
+                        check_coords = True
+                    else:
+                        check_coords = False
+                        align_write = False
+                    continue
+                if check_coords and not len(s) == 1:
+                    al_start = int(s[0])
+                    al_end = int(s[1])
+                    if start<=al_start<=end or start<=al_end<=end \
+                       or (al_start <= start and al_end >= end):
+                        align_write = True
+                    else:
+                        align_write = False
+                if align_write:
+                    f_out.write(line)
 
 # Running the tool nucdiff to compare two assemblies based on alignment with 
 # mummer, which is also performed by the nucdiff tool
