@@ -362,4 +362,4 @@ rule gc_run_nucdiff:
 
 rule gc_run_nucdiff_all:
     input: expand("gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_stat.out", \
-                  gene="LAMA4",aligntype=["align"],a1="GRCh38",a2=["CEGYPTREFV2"])
+                  gene=GENES,aligntype=["align"],a1="GRCh38",a2=["CEGYPTREFV2"])
