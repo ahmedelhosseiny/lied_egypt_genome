@@ -162,7 +162,7 @@ rule mummerplot:
 
 rule mummerplot_all:
     input: expand("{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.gp", \
-                    aligntype=["align"], \
+                    aligntype=["align","alignrepeatmasked"], \
                     a1="GRCh38", \
                     a2=["EGYPTREF","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"] + \
                        ["YORUBA","AK1","GRCh38"])
@@ -189,7 +189,7 @@ CHROMOSOMES = [str(x) for x in range(23)]+["X","Y","MT"]
 #"YORUBA", "EGYPTREFV2"
 rule mummerplot_chromosomewise_all:
     input: expand("{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}_{chrom}.gp", \
-                    aligntype=["align"], \
+                    aligntype=["align","alignrepeatmasked"], \
                     a1="GRCh38", \
                     a2=["EGYPTREF","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"] + \
                        ["YORUBA","AK1","GRCh38"], \
@@ -284,6 +284,7 @@ rule gc_delta_format:
     run:
         align_write = False
         check_coords = False
+        # Get gene start and end positions from bed file
         with open(input.gene,"r") as f_in:
             for line in f_in:
                 if line[0] == "#":
@@ -293,14 +294,26 @@ rule gc_delta_format:
                 start = int(s[1])
                 end = int(s[2])
                 assert(start<end)
+        # Got through alignment file and write to output those alignments
+        # covering (part of) the gene
+        # In this table we remember the chromsome/scaffold combis written so far
+        written_chrom_header_lines = []
         with open(input.align,"r") as f_in, open(output[0],"w") as f_out:
+            header_count = 0
             for line in f_in:
+                # Write the two header lines, the first contains the links to 
+                # the two input assembly fasta files, the second just contains 
+                # 'NUCMER'
+                if header_count < 2:
+                    f_out.write(line)
+                    header_count += 1
+                    continue
                 s = line.split(" ")
                 if line[0] == ">":
                     align_write = False
                     al_chrom = s[0][1:]
                     if al_chrom == chrom:
-                        f_out.write(line)
+                        chrom_header_line = line
                         check_coords = True
                     else:
                         check_coords = False
@@ -309,9 +322,13 @@ rule gc_delta_format:
                 if check_coords and not len(s) == 1:
                     al_start = int(s[0])
                     al_end = int(s[1])
+                    # There is an alignment covering the desired region
                     if start<=al_start<=end or start<=al_end<=end \
                        or (al_start <= start and al_end >= end):
                         align_write = True
+                        if not chrom_header_line in written_chrom_header_lines:
+                            f_out.write(chrom_header_line)
+                            written_chrom_header_lines.append(chrom_header_line)
                     else:
                         align_write = False
                 if align_write:
@@ -319,28 +336,30 @@ rule gc_delta_format:
 
 # Running the tool nucdiff to compare two assemblies based on alignment with 
 # mummer, which is also performed by the nucdiff tool
-rule run_nucdiff_for_assembly:
-    input: ref="seq_{a1}/Homo_sapiens.{a1}.dna.primary_assembly.fa", \
-           query="seq_{a2}/Homo_sapiens.{a2}.dna.primary_assembly.fa", \
-           delta="align_mummer_{a1}_vs_{a2}/assemblies/{a1}_vs_{a2}.delta"
-    output: "nucdiff_{a1}_vs_{a2}/{a1}_vs_{a2}_ref_snps.gff", \
-            "nucdiff_{a1}_vs_{a2}/{a1}_vs_{a2}_ref_struct.gff", \
-            "nucdiff_{a1}_vs_{a2}/{a1}_vs_{a2}_ref_blocks.gff", \
-            "nucdiff_{a1}_vs_{a2}/{a1}_vs_{a2}_ref_snps.vcf", \
-            "nucdiff_{a1}_vs_{a2}/{a1}_vs_{a2}_query_snps.gff", \
-            "nucdiff_{a1}_vs_{a2}/{a1}_vs_{a2}_query_struct.gff", \
-            "nucdiff_{a1}_vs_{a2}/{a1}_vs_{a2}_query_blocks.gff", \
-            "nucdiff_{a1}_vs_{a2}/{a1}_vs_{a2}_query_snps.vcf", \
-            "nucdiff_{a1}_vs_{a2}/{a1}_vs_{a2}_stat.out"
-    params: outdir=lambda wildcards: "nucdiff_"+wildcards.a1+"_vs_"+wildcards.a2
+# "--filter_opt '-l 1000 -i 99' " + 
+rule gc_run_nucdiff:
+    input: ref="seq_{a1}/Homo_sapiens.{a1}.dna.primary_assembly.fa", 
+           query="seq_{a2}/Homo_sapiens.{a2}.dna.primary_assembly.fa", 
+           delta="gene_centric/{gene}/{aligntype}_{gene}_{a1}_vs_{a2}.delta"
+    output: "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}.delta",
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_ref_snps.gff", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_ref_struct.gff", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_ref_blocks.gff", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_ref_snps.vcf", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_query_snps.gff", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_query_struct.gff", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_query_blocks.gff", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_query_snps.vcf", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_stat.out"
+    params: outdir=lambda wildcards: "gene_centric/"+wildcards.gene+"/nucdiff_"+wildcards.aligntype+"_"+wildcards.a1+"_vs_"+wildcards.a2
     conda: "envs/nucdiff.yaml"
-    shell: "nucdiff {input.ref} {input.query} {params.outdir} " + \
+    shell: "cp {input.delta} {output[0]}; " + \
+           "nucdiff {input.ref} {input.query} {params.outdir} " + \
            "{wildcards.a1}_vs_{wildcards.a2} " + \
            "--vcf yes " + \
-           "--filter_opt '-l 1000 -i 99' " + \
            "--delta_file {input.delta} " + \
            "--proc 24"
 
-rule run_nucdiff_all:
-    input: expand("nucdiff_GRCh38_vs_EGYPTREF/GRCh38_vs_EGYPTREF_stat.out", \
-                  chr=CHR_GRCh38)
+rule gc_run_nucdiff_all:
+    input: expand("gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_stat.out", \
+                  gene="LAMA4",aligntype=["align"],a1="GRCh38",a2=["CEGYPTREFV2"])
