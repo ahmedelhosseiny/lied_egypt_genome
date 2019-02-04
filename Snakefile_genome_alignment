@@ -67,6 +67,15 @@ rule align_assemblies_with_nucmer:
            "-p align_nucmer_{wildcards.a1}_vs_{wildcards.a2}/{wildcards.a1}_vs_{wildcards.a2} " + \
            "{input[0]} {input[1]}"
 
+# Selecting 1-to-1 alignments; 
+# -1 : 1-to-1 alignment allowing for rearrangements (intersection of -r and -q 
+# alignments)
+rule select_one_to_one_alignments:
+    input: "align_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.delta"
+    output: "align_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}_1to1.delta"
+    conda: "envs/mummer.yaml"
+    shell: "delta-filter -1 {input[0]} > {output[0]}"
+
 rule align_repeatmasked_assemblies_with_nucmer:
     input: ref="repeatmasked_{a1}/Homo_sapiens.{a1}.dna.primary_assembly.fa",
            query="repeatmasked_{a2}/Homo_sapiens.{a2}.dna.primary_assembly.fa"
@@ -278,7 +287,7 @@ rule gc_get_overlapping_genes:
                         f_out.write(line)
 
 rule gc_delta_format:
-    input: align="{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.delta",
+    input: align="{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}_1to1.delta",
            gene="gene_centric/{gene}/{gene}.bed"
     output: "gene_centric/{gene}/{aligntype}_{gene}_{a1}_vs_{a2}.delta"
     run:
@@ -342,15 +351,15 @@ rule gc_run_nucdiff:
            query="seq_{a2}/Homo_sapiens.{a2}.dna.primary_assembly.fa", 
            delta="gene_centric/{gene}/{aligntype}_{gene}_{a1}_vs_{a2}.delta"
     output: "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}.delta",
-            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_ref_snps.gff", 
-            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_ref_struct.gff", 
-            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_ref_blocks.gff", 
-            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_ref_snps.vcf", 
-            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_query_snps.gff", 
-            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_query_struct.gff", 
-            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_query_blocks.gff", 
-            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_query_snps.vcf", 
-            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_stat.out"
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_snps.gff", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_struct.gff", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_blocks.gff", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_snps.vcf", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_query_snps.gff", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_query_struct.gff", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_query_blocks.gff", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_query_snps.vcf", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_stat.out"
     params: outdir=lambda wildcards: "gene_centric/"+wildcards.gene+"/nucdiff_"+wildcards.aligntype+"_"+wildcards.a1+"_vs_"+wildcards.a2
     conda: "envs/nucdiff.yaml"
     shell: "cp {input.delta} {output[0]}; " + \
@@ -361,5 +370,5 @@ rule gc_run_nucdiff:
            "--proc 24"
 
 rule gc_run_nucdiff_all:
-    input: expand("gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_stat.out", \
+    input: expand("gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_stat.out", \
                   gene=GENES,aligntype=["align"],a1="GRCh38",a2=["CEGYPTREFV2"])
