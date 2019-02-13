@@ -41,13 +41,13 @@ rule repeatmasked_primary_yoruba:
     input: expand("repeatmasked_YORUBA/Homo_sapiens.YORUBA.dna.{scaffold}.fa.masked", \
                    scaffold=YORUBA_SCAFFOLDS)
     output: "repeatmasked_YORUBA/Homo_sapiens.YORUBA.dna.primary_assembly.fa"
-    shell: "cat {input} > {output}"
+    shell: "cat repeatmasked_YORUBA/Homo_sapiens.YORUBA.dna.*.fa.masked > {output}"
 
 rule repeatmasked_primary_ak1:
     input: expand("repeatmasked_AK1/Homo_sapiens.AK1.dna.{scaffold}.fa.masked", \
                    scaffold=AK1_SCAFFOLDS)
     output: "repeatmasked_AK1/Homo_sapiens.AK1.dna.primary_assembly.fa"
-    shell: "cat {input} > {output}"
+    shell: "cat repeatmasked_AK1/Homo_sapiens.AK1.dna.*.fa.masked > {output}"
 
 # Genome alignments using mummer4
 # Comparing the entire GRCh38 assembly with the entire EGYPTREF assembly
@@ -96,8 +96,8 @@ rule align_assemblies_with_nucmer:
 # -1 : 1-to-1 alignment allowing for rearrangements (intersection of -r and -q 
 # alignments)
 rule select_one_to_one_alignments:
-    input: "align_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.delta"
-    output: "align_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}_1to1.delta"
+    input: "{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.delta"
+    output: "{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}_1to1.delta"
     conda: "envs/mummer.yaml"
     shell: "delta-filter -1 {input[0]} > {output[0]}"
 
@@ -112,8 +112,8 @@ rule select_query_best_hit_in_reference_alignments:
 
 # The alignments with no filter applied (simple copying of the original file)
 rule select_all_alignments:
-    input: "align_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.delta"
-    output: "align_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}_nofilter.delta"
+    input: "{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}.delta"
+    output: "{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}_nofilter.delta"
     shell: "cp {input[0]} {output[0]}"
 
 rule align_repeatmasked_assemblies_with_nucmer:
@@ -254,6 +254,133 @@ rule mummerplot_chromosomewise_all:
                        ["YORUBA","AK1","GRCh38"], \
                     filter=["nofilter","1to1"], \
                     chrom=CHROMOSOMES)
+
+
+################################################################################
+#################### Detection of differences using Syri #######################
+################################################################################
+
+# Parameters for nucmer, delta-filter and show-coords of the mummer3 suite are
+# taken from Supplement 2 of the BioRxiv Syri publication here: 
+# https://www.biorxiv.org/content/10.1101/546622v1
+
+rule syri_align_nucmer:
+    input: ref="seq_{a1}/Homo_sapiens.{a1}.dna.primary_assembly.fa",
+           query="seq_{a2}/Homo_sapiens.{a2}.dna.primary_assembly.fa"
+    output: "syri_{a1}_vs_{a2}/{a1}_vs_{a2}.delta"
+    conda: "envs/syri.yaml"
+    shell: "nucmer " + \
+           "--maxmatch " + \
+           "-c 500 " + \
+           "-b 500 " + \
+           "-l 100 " + \
+           "--threads=16 " + \
+           "-p syri_{wildcards.a1}_vs_{wildcards.a2}/{wildcards.a1}_vs_{wildcards.a2} " + \
+           "{input[0]} {input[1]}"
+
+rule syri_delta_filter:
+    input: "syri_{a1}_vs_{a2}/{a1}_vs_{a2}.delta"
+    output: "syri_{a1}_vs_{a2}/{a1}_vs_{a2}_filtered.delta"
+    conda: "envs/syri.yaml"
+    shell: "delta-filter " + \
+           "-m " + \
+           "-i 90 " + \
+           "-l 100 " + \
+           "{input} > {output}"
+
+rule syri_show_coords:
+    input: "syri_{a1}_vs_{a2}/{a1}_vs_{a2}_filtered.delta"
+    output: "syri_{a1}_vs_{a2}/{a1}_vs_{a2}.coords"
+    conda: "envs/syri.yaml"
+    shell: "show-coords -THrd {input} > {output}"
+
+# Input Files:
+#  -c INFILE             File containing alignment coordinates in a tsv format
+#                        (default: None)
+#  -r REF                Genome A (which is considered as reference for the
+#                        alignments). Required for local variation (large
+#                        indels, CNVs) identification. (default: None)
+#  -q QRY                Genome B (which is considered as query for the
+#                        alignments). Required for local variation (large
+#                        indels, CNVs) identification. (default: None)
+#  -d DELTA              .delta file from mummer. Required for short variation
+#                        (SNPs/indels) identification when CIGAR string is not
+#                        available (default: None)
+# optional arguments:
+#  -o FOUT               Output file name (default: syri)
+#  -k                    Keep internediate output files (default: False)
+#  --log {DEBUG,INFO,WARN}
+#                        log level (default: INFO)
+#  --lf LOG_FIN          Name of log file (default: syri.log)
+#  --dir DIR             path to working directory (if not current directory)
+#                        (default: None)
+#  --prefix PREFIX       Prefix to add before the output file Names (default: )
+#  --seed SEED           seed for generating random numbers (default: 1)
+#  --nc NCORES           number of cores to use in parallel (max is number of
+#                        chromosomes) (default: 1)
+#  --novcf               Do not combine all files into one output file
+#                        (default: False)
+#SR identification:
+#  --nosr                Set to skip structural rearrangement identification
+#                        (default: False)
+#  -b BRUTERUNTIME       Cutoff to restrict brute force methods to take too
+#                        much time (in seconds). Smaller values would make
+#                        algorithm faster, but could have marginal effects on
+#                        accuracy. In general case, would not be required.
+#                        (default: 60)
+#  --unic TRANSUNICOUNT  Number of uniques bps for selecting translocation.
+#                        Smaller values would select smaller TLs better, but
+#                        may increase time and decrease accuracy. (default:
+#                        1000)
+#  --unip TRANSUNIPERCENT
+#                        Percent of unique region requried to select
+#                        translocation. Value should be in range (0,1]. Smaller
+#                        values would selection of translocation which are more
+#                        overlapped with other regions. (default: 0.5)
+#  --inc INCREASEBY      Minimum score increase required to add another
+#                        alignment to translocation cluster solution (default:
+#                        1000)
+#  --no-chrmatch         Do not allow SyRI to automatically match chromosome
+#                        ids between the two genomes if they are not equal
+#                        (default: False)
+# ShV identification:
+#  --nosv                Set to skip structural variation identification
+#                        (default: False)
+#  --nosnp               Set to skip SNP/Indel (within alignment)
+#                        identification (default: False)
+#  --all                 Use duplications too for variant identification
+#                        (default: False)
+#  --allow-offset OFFSET
+#                        BPs allowed to overlap (default: 0)
+#  --cigar               Find SNPs/indels using CIGAR string. Necessary for
+#                        alignment generated using aligners other than nucmers
+#                        (default: False)
+#  -s SSPATH             path to show-snps from mummer (default: show-snps)
+rule syri_run:
+    input: infile="syri_{a1}_vs_{a2}/{a1}_vs_{a2}.coords",
+           ref="seq_{a1}/Homo_sapiens.{a1}.dna.primary_assembly.fa",
+           query="seq_{a2}/Homo_sapiens.{a2}.dna.primary_assembly.fa",
+           delta="syri_{a1}_vs_{a2}/{a1}_vs_{a2}_filtered.delta"
+    output: "syri_{a1}_vs_{a2}/{a1}_vs_{a2}.bla"
+    params: outbase=lambda wildcards: "syri"+"_"+wildcards.a1+"_vs_"+ \
+                                      wildcards.a2+"/"+wildcards.a1+"_vs_"+ \
+                                      wildcards.a2
+    conda: "envs/syri.yaml"                                      
+    shell: "cwd/syri/bin/syri " + \
+         "-c {input.infile} " + \
+         "-r {input.ref} " + \
+         "-q {input.query} " + \
+         "-d {input.delta} " + \
+         "-o {params.outbase} " + \
+         "--dir cwd/syri/ " + \
+         "--lf {params.outbase}.log " + \
+         "--nc 16 "
+
+rule syri_run_all:
+    input: expand("syri_GRCh38_vs_{a2}/GRCh38_vs_{a2}.bla", \
+                  a2=["EGYPTREF","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"] + \
+                     ["YORUBA","AK1","GRCh38"])
+
 
 
 ################################################################################
