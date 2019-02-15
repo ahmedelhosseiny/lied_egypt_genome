@@ -1,0 +1,15 @@
+channels:
+  - defaults
+  - bioconda
+  - conda-forge
+dependencies:
+  - mummer4 == 4.0.0beta2
+  - gnuplot == 5.2.3
+  - python
+  - python-igraph
+  - cython
+  - numpy
+  - scipy
+  - pandas == 0.20.0
+  - biopython
+  - psutil

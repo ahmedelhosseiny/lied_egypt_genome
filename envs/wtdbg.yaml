@@ -1,0 +1,4 @@
+channels:
+  - bioconda
+dependencies:
+  - wtdbg == 2.3-0
