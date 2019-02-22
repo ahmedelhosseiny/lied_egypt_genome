@@ -151,3 +151,53 @@ rule symlinking_and_renaming_fastq_all:
     input: expand("10x/{name}.fastq.gz", \
            name = [x.split("_")[0]+"_S1_L00"+x.split("_")[1][1]+"_R1_001" for x in ILLUMINA_10X_LIBS]+ \
                   [x.split("_")[0]+"_S1_L00"+x.split("_")[1][1]+"_R2_001" for x in ILLUMINA_10X_LIBS])
+
+rule run_longranger_basic:
+    input: expand("10x/{{lib}}_S1_L00{lane}_R{readnumber}_001.fastq.gz", \
+                  lane=[4,5,6,7], readnumber=[1,2])
+    output: "longranger/longranger_{lib}/outs/barcoded.fastq.gz",
+            "longranger/longranger_{lib}/outs/summary.csv"
+    shell: "software2/longranger-2.2.2/longranger basic " + \
+           "--id longranger_{wildcards.lib} " + \
+           "--fastqs 10x " + \
+           "--sample {wildcards.lib}; " + \
+           "mv longranger_{wildcards.lib} longranger/.; "
+
+rule run_longranger_basic_all:
+    input: expand("longranger/longranger_{lib}/outs/barcoded.fastq.gz", \
+           lib = [x.split("_")[0] for x in ILLUMINA_10X_LIBS])
+
+rule index_assembly_for_tigmint:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.lay.fa"
+    output: "tigmint/EGYPTREFWTDBG2.fa",
+            "tigmint/EGYPTREFWTDBG2.fa.fai"
+    conda: "envs/tigmint.yaml"
+    shell: "cp {input} {output[0]}; " + \
+           "samtools faidx {output[0]}"
+
+rule bwa_index_for_tigmint:
+    input: "tigmint/EGYPTREFWTDBG2.fa",
+           "tigmint/EGYPTREFWTDBG2.fa.fai"
+    output: "tigmint/EGYPTREFWTDBG2.fa.amb",
+            "tigmint/EGYPTREFWTDBG2.fa.ann",
+            "tigmint/EGYPTREFWTDBG2.fa.bwt",
+            "tigmint/EGYPTREFWTDBG2.fa.pac",
+            "tigmint/EGYPTREFWTDBG2.fa.sa"
+    conda: "envs/tigmint.yaml"
+    shell: "bwa index {input[0]}"
+
+rule bwa_mapping_for_tigmint:
+    input: "tigmint/EGYPTREFWTDBG2.fa",
+           "longranger/longranger_{lib}/outs/barcoded.fastq.gz",
+           "tigmint/EGYPTREFWTDBG2.fa.sa"
+    output: "tigmint/{lib}.reads.sortbx.bam"
+    conda: "envs/tigmint.yaml"
+    shell: "bwa mem -t8 -p -C {input[0]} {input[1]} |" + \
+           "samtools sort -@8 -tBX -o {output}"
+
+rule merge_bam_files_for_tigmint:
+    input: expand("tigmint/{lib}.reads.sortbx.bam", \
+           lib = [x.split("_")[0] for x in ILLUMINA_10X_LIBS])
+    output: "tigmint/draft.reads.sortbx.bam"
+    conda: "envs/tigmint.yaml"
+    shell: "samtools merge -tBX {output[0]} {input}"

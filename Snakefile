@@ -71,6 +71,10 @@ LONGEST_EGYPTREFV2_SCAFFOLDS = ["fragScaff_scaffold_"+str(x)+"_pilon" for x in \
     [100,170,6,123,149,184,89,195,205,163,201,76,155,29,68,137,80,61,154,147, \
      116,212,196,158,9,26,186,194,98]] + ["original_scaffold_1041_pilon"]
 
+EGYPTREFWTDBG2_SCAFFOLDS = ["ctg"+str(x) for x in range(1,3338)]
+# Note: the six EGYPTREFWTDBG2_SCAFFOLFDS for which no repeats have been 
+# detected are ctg1293, ctg1878, ctg2618, ctg3116, ctg2493, ctg3293
+
 ################################################################################
 ######### Preprocessing of the first Novogene assembly called EGYPTREF #########
 ################################################################################
@@ -220,7 +224,7 @@ rule compute_assembly_stats:
 rule compute_content_and_assembly_numbers:
     input: expand( \
            "results/{assembly}/{task}_Homo_sapiens.{assembly}.dna.primary_assembly.txt", \
-           assembly = ["GRCh38","EGYPTREF","AK1","YORUBA","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"], \
+           assembly = ["EGYPTREFWTDBG2","GRCh38","EGYPTREF","AK1","YORUBA","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"], \
            task = ["scaffold_names","num_bases","num_all","assembly_stats"])
 
 
@@ -431,6 +435,31 @@ rule ak1_primary_assembly:
 
 
 ################################################################################
+######### Getting the genome assembly of EGYPTREF constructed by WTDBG2 ########
+################################################################################
+
+rule wtdbg2_primary_assembly:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.lay.fa"
+    output: "seq_EGYPTREFWTDBG2/Homo_sapiens.EGYPTREFWTDBG2.dna.primary_assembly.fa"
+    shell: "cp {input} {output}"
+
+
+# Writing the scaffolds of the Egyptian genome to separate fasta files because
+# processing the whole assembly often takes too much time
+rule write_scaffold_fastas_egyptrefwtdbg2:
+    input: "seq_EGYPTREFWTDBG2/Homo_sapiens.EGYPTREFWTDBG2.dna.primary_assembly.fa"
+    output: expand("seq_EGYPTREFWTDBG2/Homo_sapiens.EGYPTREFWTDBG2.dna.{scaffold}.fa", \
+                   scaffold=EGYPTREFWTDBG2_SCAFFOLDS)
+    run:
+        with open(input[0], "r") as f_in:
+            i = 0
+            for record in SeqIO.parse(f_in,"fasta"):            
+                with open(output[i], "w") as f_out:
+                    SeqIO.write(record, f_out, "fasta")
+                    i += 1
+
+
+################################################################################
 ######################### Repeat masking with repeatmasker #####################
 ################################################################################
 
@@ -554,11 +583,18 @@ rule repeatmasker_summary_table_yoruba:
     output: "repeatmasked_YORUBA/summary.txt"
     script: "scripts/repeatmasker_summary.py"
 
+# Summarising the chromosome-wise repeatmasker summary files for Egyptref wtdbg2
+rule repeatmasker_summary_table_egyptrefwtdbg2:
+    input: expand("repeatmasked_EGYPTREFWTDBG2/Homo_sapiens.EGYPTREFWTDBG2.dna.{x}.fa.tbl", \
+                  x=EGYPTREFWTDBG2_SCAFFOLDS)
+    output: "repeatmasked_EGYPTREFWTDBG2/summary.txt"
+    script: "scripts/repeatmasker_summary.py"
+
 # Making a repeatmasker stat table over all chromosomes, one line for EGYPTREF,
 # one line for GRCh38
 rule comparison_repeatmasker:
     input: expand("repeatmasked_{assembly}/summary.txt", \
-                  assembly=["EGYPTREF","EGYPTREFV2","CEGYPTREF","CEGYPTREFV2","AK1","YORUBA","GRCh38"])
+                  assembly=["EGYPTREFWTDBG2","EGYPTREF","EGYPTREFV2","CEGYPTREF","CEGYPTREFV2","AK1","YORUBA","GRCh38"])
     output: "results/repeatmasker_comparison.txt"
     script: "scripts/repeatmasker_comparison.py"
 

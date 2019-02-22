@@ -49,6 +49,12 @@ rule repeatmasked_primary_ak1:
     output: "repeatmasked_AK1/Homo_sapiens.AK1.dna.primary_assembly.fa"
     shell: "cat repeatmasked_AK1/Homo_sapiens.AK1.dna.*.fa.masked > {output}"
 
+rule repeatmasked_primary_egyptrefwtdbg2:
+    input: expand("repeatmasked_EGYPTREFWTDBG2/Homo_sapiens.EGYPTREFWTDBG2.dna.{scaffold}.fa.masked", \
+                   scaffold=EGYPTREFWTDBG2_SCAFFOLDS)
+    output: "repeatmasked_EGYPTREFWTDBG2/Homo_sapiens.EGYPTREFWTDBG2.dna.primary_assembly.fa"
+    shell: "cat repeatmasked_EGYPTREFWTDBG2/*.fa.masked > {output}"
+
 # Genome alignments using mummer4
 # Comparing the entire GRCh38 assembly with the entire EGYPTREF assembly
 # --mum:         Use anchor matches that are unique in both the reference and 
@@ -63,7 +69,7 @@ rule align_assemblies_with_nucmer:
     conda: "envs/mummer.yaml"
     shell: "nucmer " + \
            "--mum " + \
-           "--threads=32 " + \
+           "--threads=16 " + \
            "-p align_nucmer_{wildcards.a1}_vs_{wildcards.a2}/{wildcards.a1}_vs_{wildcards.a2} " + \
            "{input[0]} {input[1]}"
 
@@ -123,13 +129,13 @@ rule align_repeatmasked_assemblies_with_nucmer:
     conda: "envs/mummer.yaml"
     shell: "nucmer " + \
            "--mum " + \
-           "--threads=32 " + \
+           "--threads=16 " + \
            "-p alignrepeatmasked_nucmer_{wildcards.a1}_vs_{wildcards.a2}/{wildcards.a1}_vs_{wildcards.a2} " + \
            "{input[0]} {input[1]}"
 
 rule align_assemblies_with_nucmer_all:
     input: expand("align_nucmer_GRCh38_vs_{a}/GRCh38_vs_{a}.delta", \
-                   a=["EGYPTREF","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2","AK1","YORUBA","GRCh38"])
+                   a=["EGYPTREF","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2","EGYPTREFWTDBG2","AK1","YORUBA","GRCh38"])
 
 # Tiling: Attempts to construct a tiling path out of the query contigs as mapped
 # to the reference sequences
@@ -213,12 +219,13 @@ rule mummerplot:
            "{input[0]}; " + \
            "gnuplot {output[0]}; "
 
+#                    a2=["EGYPTREF","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"] + \
+#                       ["EGYPTREFWTDBG2","YORUBA","AK1","GRCh38"], \
 rule mummerplot_all:
     input: expand("{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}_{filter}.ps", \
                     aligntype=["align","alignrepeatmasked"], \
                     a1="GRCh38", \
-                    a2=["EGYPTREF","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"] + \
-                       ["YORUBA","AK1","GRCh38"], \
+                    a2="EGYPTREFWTDBG2", \
                     filter=["nofilter","1to1"])
 
 rule mummerplot_chromosomewise:
@@ -251,7 +258,7 @@ rule mummerplot_chromosomewise_all:
                     aligntype=["align","alignrepeatmasked"], \
                     a1="GRCh38", \
                     a2=["EGYPTREF","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"] + \
-                       ["YORUBA","AK1","GRCh38"], \
+                       ["EGYPTREFWTDBG2","YORUBA","AK1","GRCh38"], \
                     filter=["nofilter","1to1"], \
                     chrom=CHROMOSOMES)
 

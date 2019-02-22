@@ -60,6 +60,7 @@ LONGEST_EGYPTREFV2_SCAFFOLDS = ["fragScaff_scaffold_"+str(x)+"_pilon" for x in \
     [100,170,6,123,149,184,89,195,205,163,201,76,155,29,68,137,80,61,154,147, \
      116,212,196,158,9,26,186,194,98]] + ["original_scaffold_1041_pilon"]
 
+EGYPTREFWTDBG2_SCAFFOLDS = ["ctg"+str(x) for x in range(1,3338)]
 
 ################################################################################
 ####################### PacBio-related variables ###############################
