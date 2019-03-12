@@ -69,7 +69,7 @@ rule align_assemblies_with_nucmer:
     conda: "envs/mummer.yaml"
     shell: "nucmer " + \
            "--mum " + \
-           "--threads=16 " + \
+           "--threads=32 " + \
            "-p align_nucmer_{wildcards.a1}_vs_{wildcards.a2}/{wildcards.a1}_vs_{wildcards.a2} " + \
            "{input[0]} {input[1]}"
 
@@ -219,13 +219,14 @@ rule mummerplot:
            "{input[0]}; " + \
            "gnuplot {output[0]}; "
 
+#                    aligntype=["align","alignrepeatmasked"], \
 #                    a2=["EGYPTREF","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"] + \
 #                       ["EGYPTREFWTDBG2","YORUBA","AK1","GRCh38"], \
 rule mummerplot_all:
     input: expand("{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}_{filter}.ps", \
-                    aligntype=["align","alignrepeatmasked"], \
+                    aligntype=["align"], \
                     a1="GRCh38", \
-                    a2="EGYPTREFWTDBG2", \
+                    a2="EGYPTREFWTDBG2V2", \
                     filter=["nofilter","1to1"])
 
 rule mummerplot_chromosomewise:
@@ -251,14 +252,14 @@ rule mummerplot_chromosomewise:
            "gnuplot {output[0]}; "
 
 ASSEMBLIES = ["CEGYPTREFV2"]
-CHROMOSOMES = [str(x) for x in range(23)]+["X","Y","MT"]
-#"YORUBA", "EGYPTREFV2"
+CHROMOSOMES = [str(x) for x in range(1,23)]+["X","Y","MT"]
+#                   a2=["EGYPTREF","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"] + \
+#                      ["EGYPTREFWTDBG2","YORUBA","AK1","GRCh38"], \
 rule mummerplot_chromosomewise_all:
     input: expand("{aligntype}_nucmer_{a1}_vs_{a2}/chrom_{a1}_vs_{a2}_{filter}_{chrom}.ps", \
                     aligntype=["align","alignrepeatmasked"], \
                     a1="GRCh38", \
-                    a2=["EGYPTREF","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"] + \
-                       ["EGYPTREFWTDBG2","YORUBA","AK1","GRCh38"], \
+                    a2=["EGYPTREFWTDBG2"], \
                     filter=["nofilter","1to1"], \
                     chrom=CHROMOSOMES)
 

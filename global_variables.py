@@ -151,3 +151,22 @@ ILLUMINA_10X_LIBS = [
     "NDHX00201-AK657_L6",
     "NDHX00201-AK657_L7"
 ]
+
+
+################################################################################
+################ Illumina short read related variables #########################
+################################################################################
+
+# The Illumina library sample names
+ILLUMINA_SAMPLES = ["NDES00177","NDES00178","NDES00179","NDES00180","NDES00181"]
+ILLUMINA_SAMPLES_TO_LANES = {
+    "NDES00177": [4,5,6,7],
+    "NDES00178": [1,4,5,6,7],
+    "NDES00179": [4,5,6,7],
+    "NDES00180": [1,4,5,6,7],
+    "NDES00181": [4,5,6,7]
+}
+ILLUMINA_LIBS = []
+for sample in ILLUMINA_SAMPLES:
+    ILLUMINA_LIBS += [sample+"_L"+str(x) for x in \
+                      ILLUMINA_SAMPLES_TO_LANES[sample]]

@@ -75,6 +75,8 @@ EGYPTREFWTDBG2_SCAFFOLDS = ["ctg"+str(x) for x in range(1,3338)]
 # Note: the six EGYPTREFWTDBG2_SCAFFOLFDS for which no repeats have been 
 # detected are ctg1293, ctg1878, ctg2618, ctg3116, ctg2493, ctg3293
 
+LONGEST_EGYPTREFWTDBG2_SCAFFOLDS = ["ctg"+str(x) for x in range(1,31)]
+
 ################################################################################
 ######### Preprocessing of the first Novogene assembly called EGYPTREF #########
 ################################################################################
@@ -224,7 +226,7 @@ rule compute_assembly_stats:
 rule compute_content_and_assembly_numbers:
     input: expand( \
            "results/{assembly}/{task}_Homo_sapiens.{assembly}.dna.primary_assembly.txt", \
-           assembly = ["EGYPTREFWTDBG2","GRCh38","EGYPTREF","AK1","YORUBA","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"], \
+           assembly = ["EGYPTREFWTDBG2V2","EGYPTREFWTDBG2","GRCh38","EGYPTREF","AK1","YORUBA","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"], \
            task = ["scaffold_names","num_bases","num_all","assembly_stats"])
 
 
@@ -458,6 +460,27 @@ rule write_scaffold_fastas_egyptrefwtdbg2:
                     SeqIO.write(record, f_out, "fasta")
                     i += 1
 
+rule wtdbg2_secondary_assembly:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.2nd.fa"
+    output: "seq_EGYPTREFWTDBG2V2/Homo_sapiens.EGYPTREFWTDBG2V2.dna.primary_assembly.fa"
+    shell: "cp {input} {output}"
+
+
+# Writing the scaffolds of the Egyptian genome to separate fasta files because
+# processing the whole assembly often takes too much time
+rule write_scaffold_fastas_egyptrefwtdbg2v2:
+    input: "seq_EGYPTREFWTDBG2V2/Homo_sapiens.EGYPTREFWTDBG2V2.dna.primary_assembly.fa"
+    output: expand("seq_EGYPTREFWTDBG2V2/Homo_sapiens.EGYPTREFWTDBG2V2.dna.{scaffold}.fa", \
+                   scaffold=EGYPTREFWTDBG2_SCAFFOLDS)
+    run:
+        with open(input[0], "r") as f_in:
+            i = 0
+            for record in SeqIO.parse(f_in,"fasta"):            
+                with open(output[i], "w") as f_out:
+                    SeqIO.write(record, f_out, "fasta")
+                    i += 1
+
+
 
 ################################################################################
 ######################### Repeat masking with repeatmasker #####################
@@ -594,7 +617,7 @@ rule repeatmasker_summary_table_egyptrefwtdbg2:
 # one line for GRCh38
 rule comparison_repeatmasker:
     input: expand("repeatmasked_{assembly}/summary.txt", \
-                  assembly=["EGYPTREFWTDBG2","EGYPTREF","EGYPTREFV2","CEGYPTREF","CEGYPTREFV2","AK1","YORUBA","GRCh38"])
+                  assembly=["EGYPTREFWTDBG2V2","EGYPTREFWTDBG2","EGYPTREF","EGYPTREFV2","CEGYPTREF","CEGYPTREFV2","AK1","YORUBA","GRCh38"])
     output: "results/repeatmasker_comparison.txt"
     script: "scripts/repeatmasker_comparison.py"
 
@@ -682,7 +705,9 @@ rule dotplots_scaffold_vs_chromosomes_all:
             expand("align_lastz_GRCh38_vs_EGYPTREFV2/dotplots/{scaffold}.pdf", \
                    scaffold=LONGEST_EGYPTREFV2_SCAFFOLDS),
             expand("align_lastz_GRCh38_vs_CEGYPTREFV2/dotplots/{contig}.pdf", \
-                   contig=CEGYPTV2_CONTIGS[:50])
+                   contig=CEGYPTV2_CONTIGS[:50]),
+            expand("align_lastz_GRCh38_vs_EGYPTREFWTDBG2/dotplots/{scaffold}.pdf", \
+                   scaffold=LONGEST_EGYPTREFWTDBG2_SCAFFOLDS)
 
 # All versus all comparisons of reference and Egyptian genome
 rule align_all_vs_all:

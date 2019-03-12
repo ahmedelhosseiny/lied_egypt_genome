@@ -130,11 +130,67 @@ rule assembl_with_wtdbg2:
 #  -V          Print version information and then exit
 rule consensus_with_wtdbg2:
     input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.lay.gz"
-    output: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.lay.fa"
+    output: protected("assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.lay.fa")
     conda: "envs/wtdbg.yaml"
     shell: "wtpoa-cns -i {input} " + \
                     " -t 31 " + \
                     " -o {output}"
+
+rule polish_with_pb_reads:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.lay.fa",
+           "pacbio/pb_EGYPTREF.fa"
+    output: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.map.bam",
+            "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.map.srt.bam",
+            protected("assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.2nd.fa")
+    params: prefix="assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.map.srt"
+    conda: "envs/polish_wtdbg.yaml"
+    shell: "minimap2 -t 31 -x map-pb -a {input[0]} {input[1]} | " + \
+           "samtools view -Sb - > {output[0]}; " + \
+           "samtools sort {output[0]} -o {output[1]}; " + \
+           "samtools view {output[1]} | " + \
+           "wtpoa-cns -t 31 -d {input[0]} -i - -fo {output[2]}; "
+
+# Mapping the Illumina PE data to the scaffolds
+# -a STR: Algorithm for constructing BWT index. Chosen option: 
+#         bwtsw: Algorithm implemented in BWT-SW. This method works with the 
+#         whole human genome.
+# -p STR: Prefix of the output database [same as db filename] 
+rule bwa_index_for_polishing:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.2nd.fa"
+    output: "assembly_wtdbg2/bwa/EGYPTREF_wtdbg2.ctg.2nd.amb",
+            "assembly_wtdbg2/bwa/EGYPTREF_wtdbg2.ctg.2nd.ann",
+            "assembly_wtdbg2/bwa/EGYPTREF_wtdbg2.ctg.2nd.bwt",
+            "assembly_wtdbg2/bwa/EGYPTREF_wtdbg2.ctg.2nd.pac",
+            "assembly_wtdbg2/bwa/EGYPTREF_wtdbg2.ctg.2nd.sa"
+    conda: "envs/bwa.yaml"
+    shell: "bwa index -a bwtsw " + \
+                     "-p assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.2nd " + \
+                     "{input}"
+
+rule bwa_mem_for_polishing:
+    input: index = "assembly_wtdbg2/bwa/EGYPTREF_wtdbg2.ctg.2nd.sa",
+           fastq_r1 = "data/02.DES/{lib}_1.fq.gz",
+           fastq_r2 = "data/02.DES/{lib}_2.fq.gz"
+    output: "assembly_wtdbg2/bwa/{lib}.bam"
+    conda: "envs/bwa.yaml"
+    shell: "bwa mem -t 30 " + \
+           "assembly_wtdbg2/bwa/EGYPTREF_wtdbg2.ctg.2nd "+\
+           "{input.fastq_r1} {input.fastq_r2} " + \
+           " | samtools sort -@30 -o {output} -"
+
+rule merge_bam_for_polishing:
+    input: expand("assembly_wtdbg2/bwa/{lib}.bam", lib=ILLUMINA_LIBS)
+    output: "assembly_wtdbg2/bwa/sr.srt.bam"
+    conda: "envs/polish_wtdbg.yaml"
+    shell: "samtools merge {output} {input}"
+
+rule polish_with_short_reads:
+    input: "assembly_wtdbg2/bwa/sr.srt.bam",
+           "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.2nd.fa"
+    output: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.3rd.fa"
+    conda: "envs/polish_wtdbg.yaml"
+    shell: "samtools view {input[0]} | " + \
+           "wtpoa-cns -t 30 -x sam-sr -d {input[1]} -i - -fo {output}"
 
 
 ################################################################################
@@ -200,4 +256,19 @@ rule merge_bam_files_for_tigmint:
            lib = [x.split("_")[0] for x in ILLUMINA_10X_LIBS])
     output: "tigmint/draft.reads.sortbx.bam"
     conda: "envs/tigmint.yaml"
+    conda: "envs/tigmint.yaml"
     shell: "samtools merge -tBX {output[0]} {input}"
+
+rule run_tigmint_molecule_single_10xlib:
+    input: "tigmint/{lib}.reads.sortbx.bam"
+    output: "tigmint/{lib}.reads.molecule.bed"
+    conda: "envs/tigmint.yaml"
+    shell: "tigmint-molecule {input} | " + \
+         "sort -k1,1 -k2,2n -k3,3n > {output}"
+
+rule run_tigmint_cut_single_10xlib:
+    input: "tigmint/EGYPTREFWTDBG2.fa",
+           "tigmint/{lib}.reads.molecule.bed"
+    output: "tigmint/{lib}.tigmint.fa"
+    conda: "envs/tigmint.yaml"
+    shell: "tigmint-cut -p16 -o {output} {input[0]} {input[1]}"
