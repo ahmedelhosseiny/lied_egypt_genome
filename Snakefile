@@ -226,7 +226,7 @@ rule compute_assembly_stats:
 rule compute_content_and_assembly_numbers:
     input: expand( \
            "results/{assembly}/{task}_Homo_sapiens.{assembly}.dna.primary_assembly.txt", \
-           assembly = ["EGYPTREFWTDBG2V2","EGYPTREFWTDBG2","GRCh38","EGYPTREF","AK1","YORUBA","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"], \
+           assembly = ["EGYPTREFWTDBG2V3","EGYPTREFWTDBG2V2","EGYPTREFWTDBG2","GRCh38","EGYPTREF","AK1","YORUBA","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"], \
            task = ["scaffold_names","num_bases","num_all","assembly_stats"])
 
 
@@ -465,7 +465,6 @@ rule wtdbg2_secondary_assembly:
     output: "seq_EGYPTREFWTDBG2V2/Homo_sapiens.EGYPTREFWTDBG2V2.dna.primary_assembly.fa"
     shell: "cp {input} {output}"
 
-
 # Writing the scaffolds of the Egyptian genome to separate fasta files because
 # processing the whole assembly often takes too much time
 rule write_scaffold_fastas_egyptrefwtdbg2v2:
@@ -480,6 +479,23 @@ rule write_scaffold_fastas_egyptrefwtdbg2v2:
                     SeqIO.write(record, f_out, "fasta")
                     i += 1
 
+
+rule wtdbg2_shortread_polished_assembly:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.3rd.fa"
+    output: "seq_EGYPTREFWTDBG2V3/Homo_sapiens.EGYPTREFWTDBG2V3.dna.primary_assembly.fa"
+    shell: "cp {input} {output}"
+
+rule write_scaffold_fastas_egyptrefwtdbg2v3:
+    input: "seq_EGYPTREFWTDBG2V3/Homo_sapiens.EGYPTREFWTDBG2V3.dna.primary_assembly.fa"
+    output: expand("seq_EGYPTREFWTDBG2V3/Homo_sapiens.EGYPTREFWTDBG2V3.dna.{scaffold}.fa", \
+                   scaffold=EGYPTREFWTDBG2_SCAFFOLDS)
+    run:
+        with open(input[0], "r") as f_in:
+            i = 0
+            for record in SeqIO.parse(f_in,"fasta"):            
+                with open(output[i], "w") as f_out:
+                    SeqIO.write(record, f_out, "fasta")
+                    i += 1
 
 
 ################################################################################

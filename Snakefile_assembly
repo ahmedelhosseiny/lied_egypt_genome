@@ -142,7 +142,6 @@ rule polish_with_pb_reads:
     output: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.map.bam",
             "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.map.srt.bam",
             protected("assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.2nd.fa")
-    params: prefix="assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.map.srt"
     conda: "envs/polish_wtdbg.yaml"
     shell: "minimap2 -t 31 -x map-pb -a {input[0]} {input[1]} | " + \
            "samtools view -Sb - > {output[0]}; " + \
@@ -164,7 +163,7 @@ rule bwa_index_for_polishing:
             "assembly_wtdbg2/bwa/EGYPTREF_wtdbg2.ctg.2nd.sa"
     conda: "envs/bwa.yaml"
     shell: "bwa index -a bwtsw " + \
-                     "-p assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.2nd " + \
+                     "-p assembly_wtdbg2/bwa/EGYPTREF_wtdbg2.ctg.2nd " + \
                      "{input}"
 
 rule bwa_mem_for_polishing:
@@ -271,4 +270,104 @@ rule run_tigmint_cut_single_10xlib:
            "tigmint/{lib}.reads.molecule.bed"
     output: "tigmint/{lib}.tigmint.fa"
     conda: "envs/tigmint.yaml"
-    shell: "tigmint-cut -p16 -o {output} {input[0]} {input[1]}"
+    shell: "tigmint-cut -p1 -o {output} {input[0]} {input[1]}"
+
+rule run_tigmint_make_single_10xlib:
+    input: "tigmint/EGYPTREFWTDBG2.fa",
+           "longranger/longranger_{lib}/outs/barcoded.fastq.gz"
+    output: "tigmint/{lib}.arcs.fa"
+    conda: "envs/tigmint.yaml"
+    shell: "cd tigmint; tigmint-make arcs " \
+           "draft=EGYPTREFWTDBG2 " + \
+           "reads=test " + \
+           "ref=GRCh38 G=3088269832"
+
+
+################################################################################
+##################### Mapping 10X data against reference #######################
+################################################################################
+
+rule bwa_index_10x_for_grch38:
+    input: "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa",
+           "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.fai"
+    output: "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.amb",
+            "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.ann",
+            "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.bwt",
+            "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.pac",
+            "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.sa"
+    conda: "envs/tigmint.yaml"
+    shell: "bwa index {input[0]}"
+
+rule bwa_mapping_10x_against_grch38:
+    input: "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa",
+           "longranger/longranger_{lib}/outs/barcoded.fastq.gz",
+           "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.sa"
+    output: "map_10x_GRCh38/{lib}.bam"
+    conda: "envs/tigmint.yaml"
+    shell: "bwa mem -t 48 -p -C {input[0]} {input[1]} |" + \
+           "samtools sort -@48 -o {output}"
+
+rule bwa_mapping_10x_against_grch38_all_libs:
+    input: expand("map_10x_GRCh38/{lib}.bam", \
+           lib = ["NDHX00201-AK654","NDHX00201-AK655","NDHX00201-AK656"])#[x.split("_")[0] for x in ILLUMINA_10X_LIBS])
+
+
+################################################################################
+################## Mapping PacBio data against reference #######################
+################################################################################
+
+rule minimap_mapping_pb_against_grch38:
+    input: "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa",
+           "pacbio/pb_EGYPTREF.fa"
+    output: temp("map_pb_GRCh38/EGYPTREF.bam")
+    conda: "envs/polish_wtdbg.yaml"
+    shell: "minimap2 -t 48 -x map-pb -a {input[0]} {input[1]} | " + \
+           "samtools view -Sb - > {output} "
+
+rule minimap_sort_pb_grch38:
+    input: "map_pb_GRCh38/EGYPTREF.bam"
+    output: "map_pb_GRCh38/EGYPTREF.srt.bam"
+    conda: "envs/polish_wtdbg.yaml"
+    shell: "samtools sort -@48 {input} -o {output} "
+
+
+################################################################################
+################## Assembly quality assessment using Quast #####################
+################################################################################
+
+rule get_gff_file:
+    output: temp("annotations/Homo_sapiens.GRCh38.94.gff3.gz")
+    shell: "wget -P annotations ftp://ftp.ensembl.org/pub/release-94/gff3/homo_sapiens/Homo_sapiens.GRCh38.94.gff3.gz"
+
+rule extract_gff_file:
+    input:  "annotations/Homo_sapiens.GRCh38.94.gff3.gz"
+    output: "annotations/Homo_sapiens.GRCh38.94.gff3"
+    shell: "gzip -cdk {input} > {output}"
+
+# -r  Reference genome file. Optional. Many metrics can't be evaluated without 
+#     a reference. If this is omitted, QUAST will only report the metrics that 
+#     can be evaluated without a reference
+# -g  File with genomic feature positions in the reference genome. If you use 
+#     GFF format and would like to count only a specific feature from it (e.g., 
+#     only "CDS" or only "gene") you can specify this feature followed by a 
+#     colon (":") as the filepath prefix (do not use spaces!). 
+# -t  Number of threads
+# --large Genome is large (typically > 100 Mbp). Use optimal parameters for 
+#     evaluation of large genomes. Affects speed and accuracy. In particular, 
+#     imposes --eukaryote --min-contig 3000 --min-alignment 500 
+#     --extensive-mis-size 7000 (can be overridden manually with the 
+#     corresponding options). In addition, this mode tries to identify 
+#     misassemblies caused by transposable elements and exclude them from the 
+#     number of misassemblies. See Mikheenko et al., 2018 for more details. 
+rule run_quast:
+    input: "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa",
+           "annotations/Homo_sapiens.GRCh38.94.gff3",
+           expand("seq_{a}/Homo_sapiens.{a}.dna.primary_assembly.fa", \
+                  a=["EGYPTREFWTDBG2V3","CEGYPTREFV2"])
+    output: "quast_results2/latest/report.txt"
+    conda: "envs/quast.yaml"
+    shell: "quast.py {input[2]} {input[3]} " + \
+           "-r {input[0]} " + \
+           "-g gene:{input[1]} " + \
+           "-t 30 " + \
+           "--large "

@@ -506,11 +506,12 @@ rule gc_run_nucdiff:
            "{wildcards.a1}_vs_{wildcards.a2} " + \
            "--vcf yes " + \
            "--delta_file {input.delta} " + \
-           "--proc 24"
+           "--proc 8"
 
 rule gc_run_nucdiff_all:
     input: expand("gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_stat.out", \
-                  gene=GENES,aligntype=["align"],a1="GRCh38",a2=["CEGYPTREFV2"])
+                  gene=GENES,aligntype=["align"],a1="GRCh38", \
+                  a2=["CEGYPTREFV2","EGYPTREFWTDBG2","EGYPTREFWTDBG2V2","EGYPTREFWTDBG2V3"])
 
 # VCF file from assembly here get annotated with dbsnp IDs
 
