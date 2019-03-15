@@ -2,3 +2,4 @@ channels:
   - bioconda
 dependencies:
   - quast == 5.0.2-0
+  - circos == 0.69.6-0

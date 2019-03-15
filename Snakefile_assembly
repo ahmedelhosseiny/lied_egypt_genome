@@ -284,22 +284,74 @@ rule run_tigmint_make_single_10xlib:
 
 
 ################################################################################
+##################### Variant calling using 10X data ###########################
+################################################################################
+
+rule get_longranger_reference:
+    output: temp("longranger_wgs/ref/refdata-GRCh38-2.1.0.tar.gz")
+    shell: "wget -P longranger_wgs/ref " + \
+           "http://cf.10xgenomics.com/supp/genome/refdata-GRCh38-2.1.0.tar.gz"
+
+rule unpack_logranger_reference:
+    input: "longranger_wgs/ref/refdata-GRCh38-2.1.0.tar.gz"
+    output: directory("longranger_wgs/ref/refdata-GRCh38-2.1.0")
+    shell: "tar -C longranger_wgs/ref -xzvf {input}"
+
+rule run_longranger_wgs:
+    input: ref="longranger_wgs/ref/refdata-GRCh38-2.1.0",
+           vcf="variants_GRCh38/EGYPTREF.vcf",
+           mro="longranger_wgs/egyptref-multi.mro",
+           fastq=expand("10x/{lib}_S1_L00{lane}_R{readnumber}_001.fastq.gz", \
+                         lib=[x.split("_")[0] for x in ILLUMINA_10X_LIBS], \
+                         lane=[4,5,6,7], readnumber=[1,2])
+    output: "longranger_wgs/EGYPTREF/outs/summary.csv"
+    shell: "cd longranger_wgs; " + \
+           "../software/longranger-2.2.2/longranger wgs EGYPTREF egyptref-multi.mro"
+    
+#           "../software2/longranger-2.2.2/longranger wgs " + \
+#           "--id {wildcards.lib} " + \
+#           "--reference /scratch/node25_genome_alignment/{input.ref} " + \ 
+#           "--fastqs ../10x " + \
+#           "--sample {wildcards.lib} " + \
+#           "--vcmode freebayes " #+ \
+#           "--precalled {input.vcf}" #+ \
+#           "--sample EGYPTREF; "
+
+
+################################################################################
 ##################### Mapping 10X data against reference #######################
 ################################################################################
 
-rule bwa_index_10x_for_grch38:
+rule cp_ref_for_bwa_10x:
     input: "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa",
            "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.fai"
+    output: "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa",
+           "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.fai"
+    shell: "cp {input[0]} {output[0]}; " + \
+           "cp {input[1]} {output[1]} "
+
+rule bwa_index_10x_for_grch38:
+    input: "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa",
+           "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.fai"
     output: "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.amb",
             "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.ann",
             "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.bwt",
             "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.pac",
             "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.sa"
+    params: prefix="map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa"
     conda: "envs/tigmint.yaml"
-    shell: "bwa index {input[0]}"
+    shell: "bwa index -p {params.prefix} {input[0]}"
 
+# -p  Smart pairing. If two adjacent reads have the same name, they are 
+#     considered to form a read pair. This way, paired-end and single-end reads 
+#     can  be mixed in a single FASTA/Q stream.
+# -C  Append append FASTA/Q comment to SAM output. This option can be used to 
+#     transfer read meta information (e.g. barcode) to the SAM output. Note 
+#     that the  FASTA/Q comment (the string after a space in the header line) 
+#     must conform the SAM spec (e.g. BC:Z:CGTAC). Malformated comments lead to 
+#     incorrect SAM output.
 rule bwa_mapping_10x_against_grch38:
-    input: "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa",
+    input: "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa",
            "longranger/longranger_{lib}/outs/barcoded.fastq.gz",
            "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.sa"
     output: "map_10x_GRCh38/{lib}.bam"
@@ -309,7 +361,7 @@ rule bwa_mapping_10x_against_grch38:
 
 rule bwa_mapping_10x_against_grch38_all_libs:
     input: expand("map_10x_GRCh38/{lib}.bam", \
-           lib = ["NDHX00201-AK654","NDHX00201-AK655","NDHX00201-AK656"])#[x.split("_")[0] for x in ILLUMINA_10X_LIBS])
+           lib = [x.split("_")[0] for x in ILLUMINA_10X_LIBS])
 
 
 ################################################################################
@@ -359,15 +411,16 @@ rule extract_gff_file:
 #     corresponding options). In addition, this mode tries to identify 
 #     misassemblies caused by transposable elements and exclude them from the 
 #     number of misassemblies. See Mikheenko et al., 2018 for more details. 
+ASSEMBLIES = ["EGYPTREFWTDBG2V3","EGYPTREFWTDBG2V2","EGYPTREFWTDBG2","EGYPTREFV2","CEGYPTREFV2","AK1","YORUBA","EGYPTREF","CEGYPTREF"]
 rule run_quast:
     input: "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa",
            "annotations/Homo_sapiens.GRCh38.94.gff3",
            expand("seq_{a}/Homo_sapiens.{a}.dna.primary_assembly.fa", \
-                  a=["EGYPTREFWTDBG2V3","CEGYPTREFV2"])
+                  a=ASSEMBLIES)
     output: "quast_results2/latest/report.txt"
     conda: "envs/quast.yaml"
-    shell: "quast.py {input[2]} {input[3]} " + \
+    shell: "quast.py {input[2]} " + \
            "-r {input[0]} " + \
            "-g gene:{input[1]} " + \
-           "-t 30 " + \
+           "-t 48 " + \
            "--large "
