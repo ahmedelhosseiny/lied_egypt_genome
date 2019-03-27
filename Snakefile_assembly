@@ -223,40 +223,64 @@ rule run_longranger_basic_all:
            lib = [x.split("_")[0] for x in ILLUMINA_10X_LIBS])
 
 rule index_assembly_for_tigmint:
-    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.lay.fa"
-    output: "tigmint/EGYPTREFWTDBG2.fa",
-            "tigmint/EGYPTREFWTDBG2.fa.fai"
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.3rd.fa"
+    output: "tigmint/EGYPTREFWTDBG2V3.fa",
+            "tigmint/EGYPTREFWTDBG2V3.fa.fai"
     conda: "envs/tigmint.yaml"
     shell: "cp {input} {output[0]}; " + \
            "samtools faidx {output[0]}"
 
 rule bwa_index_for_tigmint:
-    input: "tigmint/EGYPTREFWTDBG2.fa",
-           "tigmint/EGYPTREFWTDBG2.fa.fai"
-    output: "tigmint/EGYPTREFWTDBG2.fa.amb",
-            "tigmint/EGYPTREFWTDBG2.fa.ann",
-            "tigmint/EGYPTREFWTDBG2.fa.bwt",
-            "tigmint/EGYPTREFWTDBG2.fa.pac",
-            "tigmint/EGYPTREFWTDBG2.fa.sa"
+    input: "tigmint/EGYPTREFWTDBG2V3.fa",
+           "tigmint/EGYPTREFWTDBG2V3.fa.fai"
+    output: "tigmint/EGYPTREFWTDBG2V3.fa.amb",
+            "tigmint/EGYPTREFWTDBG2V3.fa.ann",
+            "tigmint/EGYPTREFWTDBG2V3.fa.bwt",
+            "tigmint/EGYPTREFWTDBG2V3.fa.pac",
+            "tigmint/EGYPTREFWTDBG2V3.fa.sa"
     conda: "envs/tigmint.yaml"
     shell: "bwa index {input[0]}"
 
 rule bwa_mapping_for_tigmint:
-    input: "tigmint/EGYPTREFWTDBG2.fa",
+    input: "tigmint/EGYPTREFWTDBG2V3.fa",
            "longranger/longranger_{lib}/outs/barcoded.fastq.gz",
-           "tigmint/EGYPTREFWTDBG2.fa.sa"
+           "tigmint/EGYPTREFWTDBG2V3.fa.sa"
     output: "tigmint/{lib}.reads.sortbx.bam"
     conda: "envs/tigmint.yaml"
     shell: "bwa mem -t8 -p -C {input[0]} {input[1]} |" + \
            "samtools sort -@8 -tBX -o {output}"
 
+# The first 10X lib doesn't need barcode renaming
+rule renaming_barcodes_first_lib:
+    input: "tigmint/NDHX00201-AK654.reads.sortbx.bam"
+    output: "tigmint/NDHX00201-AK654.reads.renamedbx.bam"
+    shell: "cp {input} {output}"
+
+# The second 10X lib gets barcodes *-2 (instead of *-1)
+rule renaming_barcodes_second_lib:
+    input: "tigmint/NDHX00201-AK655.reads.sortbx.bam"
+    output: "tigmint/NDHX00201-AK655.reads.renamedbx.bam"
+    conda: "envs/tigmint.yaml"
+    shell: "samtools view -h {input} | sed 's/-1$/-2/g' > {output}"
+
+rule renaming_barcodes_third_lib:
+    input: "tigmint/NDHX00201-AK656.reads.sortbx.bam"
+    output: "tigmint/NDHX00201-AK656.reads.renamedbx.bam"
+    conda: "envs/tigmint.yaml"
+    shell: "samtools view -h {input} | sed 's/-1$/-3/g' > {output}"
+
+rule renaming_barcodes_fourth_lib:
+    input: "tigmint/NDHX00201-AK657.reads.sortbx.bam"
+    output: "tigmint/NDHX00201-AK657.reads.renamedbx.bam"
+    conda: "envs/tigmint.yaml"
+    shell: "samtools view -h {input} | sed 's/-1$/-4/g' > {output}"
+
 rule merge_bam_files_for_tigmint:
-    input: expand("tigmint/{lib}.reads.sortbx.bam", \
+    input: expand("tigmint/{lib}.reads.renamedbx.bam", \
            lib = [x.split("_")[0] for x in ILLUMINA_10X_LIBS])
-    output: "tigmint/draft.reads.sortbx.bam"
+    output: "tigmint/draft.reads.renamedbx.bam"
     conda: "envs/tigmint.yaml"
-    conda: "envs/tigmint.yaml"
-    shell: "samtools merge -tBX {output[0]} {input}"
+    shell: "samtools merge -@32 -tBX {output[0]} {input}"
 
 rule run_tigmint_molecule_single_10xlib:
     input: "tigmint/{lib}.reads.sortbx.bam"
@@ -266,21 +290,28 @@ rule run_tigmint_molecule_single_10xlib:
          "sort -k1,1 -k2,2n -k3,3n > {output}"
 
 rule run_tigmint_cut_single_10xlib:
-    input: "tigmint/EGYPTREFWTDBG2.fa",
+    input: "tigmint/EGYPTREFWTDBG2V3.fa",
            "tigmint/{lib}.reads.molecule.bed"
     output: "tigmint/{lib}.tigmint.fa"
     conda: "envs/tigmint.yaml"
-    shell: "tigmint-cut -p1 -o {output} {input[0]} {input[1]}"
+    shell: "tigmint-cut -p8 -o {output} {input[0]} {input[1]}"
 
-rule run_tigmint_make_single_10xlib:
-    input: "tigmint/EGYPTREFWTDBG2.fa",
-           "longranger/longranger_{lib}/outs/barcoded.fastq.gz"
-    output: "tigmint/{lib}.arcs.fa"
+rule run_tigmint_molecule:
+    input: "tigmint/draft.reads.renamedbx.bam"
+    output: "tigmint/draft.reads.molecule.bed"
     conda: "envs/tigmint.yaml"
-    shell: "cd tigmint; tigmint-make arcs " \
-           "draft=EGYPTREFWTDBG2 " + \
-           "reads=test " + \
-           "ref=GRCh38 G=3088269832"
+    shell: "tigmint-molecule {input} | " + \
+         "sort -k1,1 -k2,2n -k3,3n > {output}"
+
+rule run_tigmint_cut:
+    input: "tigmint/EGYPTREFWTDBG2V3.fa",
+           "tigmint/draft.reads.molecule.bed"
+    output: "tigmint/draft.tigmint.fa"
+    conda: "envs/tigmint.yaml"
+    shell: "tigmint-cut -p8 -o {output} {input[0]} {input[1]}"
+
+rule run_tigmint:
+    input: "tigmint/draft.tigmint.fa"
 
 
 ################################################################################
@@ -304,9 +335,10 @@ rule run_longranger_wgs:
            fastq=expand("10x/{lib}_S1_L00{lane}_R{readnumber}_001.fastq.gz", \
                          lib=[x.split("_")[0] for x in ILLUMINA_10X_LIBS], \
                          lane=[4,5,6,7], readnumber=[1,2])
-    output: "longranger_wgs/EGYPTREF/outs/summary.csv"
+    output: "longranger_wgs/longranger.done"
     shell: "cd longranger_wgs; " + \
-           "../software/longranger-2.2.2/longranger wgs EGYPTREF egyptref-multi.mro"
+           "../software/longranger-2.2.2/longranger wgs EGYPTREF egyptref-multi.mro; " + \
+           "touch {output}; "
     
 #           "../software2/longranger-2.2.2/longranger wgs " + \
 #           "--id {wildcards.lib} " + \
@@ -417,10 +449,14 @@ rule run_quast:
            "annotations/Homo_sapiens.GRCh38.94.gff3",
            expand("seq_{a}/Homo_sapiens.{a}.dna.primary_assembly.fa", \
                   a=ASSEMBLIES)
-    output: "quast_results2/latest/report.txt"
+    output: "quast_results/quast.done"
+    params: assemblies=lambda wildcards, input:" ".join(input[2:])
     conda: "envs/quast.yaml"
-    shell: "quast.py {input[2]} " + \
+    shell: "quast.py {params.assemblies} " + \
            "-r {input[0]} " + \
            "-g gene:{input[1]} " + \
            "-t 48 " + \
-           "--large "
+           "--large " + \
+           "--memory-efficient " + \
+           "--circos; " + \
+           "touch {output} "

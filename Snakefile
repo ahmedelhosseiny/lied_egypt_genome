@@ -2295,13 +2295,13 @@ rule gc_get_mapped_10x_egyptref_reads:
            "samtools index {output[0]} "
 
 rule gc_get_mapped_egyptref_reads_all:
-    input: expand("gene_centric/{gene}/{sample}.{gene}.bam", \
-                   sample=EGYPT_SAMPLES, \
-                   gene=GENES),
-           expand("gene_centric/{gene}/EGYPTREF.{gene}.pb.bam", gene=GENES),
+    input: expand("gene_centric/{gene}/EGYPTREF.{gene}.pb.bam", gene=GENES),
            expand("gene_centric/{gene}/EGYPTREF.{gene}.{lib}_10x.bam", \
                   lib=[x.split("_")[0] for x in ILLUMINA_10X_LIBS], gene=GENES),
-           expand("gene_centric/{gene}/{gene}_overlapping.gtf", gene=GENES)
+           expand("gene_centric/{gene}/{gene}_overlapping.gtf", gene=GENES)#,
+#           expand("gene_centric/{gene}/{sample}.{gene}.bam", \
+#                   sample=EGYPT_SAMPLES, \
+#                   gene=GENES)
 
 # Get the SNP calls of the Egyptians for the specified genes
 rule gc_get_variants:
