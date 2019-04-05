@@ -149,12 +149,12 @@ rule polish_with_pb_reads:
            "samtools view {output[1]} | " + \
            "wtpoa-cns -t 31 -d {input[0]} -i - -fo {output[2]}; "
 
-# Mapping the Illumina PE data to the scaffolds
+# Mapping the Illumina PE data to the contigs
 # -a STR: Algorithm for constructing BWT index. Chosen option: 
 #         bwtsw: Algorithm implemented in BWT-SW. This method works with the 
 #         whole human genome.
 # -p STR: Prefix of the output database [same as db filename] 
-rule bwa_index_for_polishing:
+rule bwa_index_for_polishing_2nd:
     input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.2nd.fa"
     output: "assembly_wtdbg2/bwa/EGYPTREF_wtdbg2.ctg.2nd.amb",
             "assembly_wtdbg2/bwa/EGYPTREF_wtdbg2.ctg.2nd.ann",
@@ -191,6 +191,87 @@ rule polish_with_short_reads:
     shell: "samtools view {input[0]} | " + \
            "wtpoa-cns -t 30 -x sam-sr -d {input[1]} -i - -fo {output}"
 
+
+################################################################################
+################# Polishing using Illumina PE data and pilon ###################
+################################################################################
+
+# Mapping the Illumina PE data to the contigs
+# -a STR: Algorithm for constructing BWT index. Chosen option: 
+#         bwtsw: Algorithm implemented in BWT-SW. This method works with the 
+#         whole human genome.
+# -p STR: Prefix of the output database [same as db filename] 
+rule bwa_index_for_polishing_pilon:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.lay.fa"
+    output: "assembly_wtdbg2/bwa_pilon/EGYPTREF_wtdbg2.ctg.amb",
+            "assembly_wtdbg2/bwa_pilon/EGYPTREF_wtdbg2.ctg.ann",
+            "assembly_wtdbg2/bwa_pilon/EGYPTREF_wtdbg2.ctg.bwt",
+            "assembly_wtdbg2/bwa_pilon/EGYPTREF_wtdbg2.ctg.pac",
+            "assembly_wtdbg2/bwa_pilon/EGYPTREF_wtdbg2.ctg.sa"
+    conda: "envs/polish_pilon.yaml"
+    shell: "bwa index -a bwtsw " + \
+                     "-p assembly_wtdbg2/bwa_pilon/EGYPTREF_wtdbg2.ctg " + \
+                     "{input}"
+
+rule bwa_mem_for_polishing_pilon:
+    input: index = "assembly_wtdbg2/bwa_pilon/EGYPTREF_wtdbg2.ctg.sa",
+           fastq_r1 = "data/02.DES/{lib}_1.fq.gz",
+           fastq_r2 = "data/02.DES/{lib}_2.fq.gz"
+    output: "assembly_wtdbg2/bwa_pilon/{lib}.bam"
+    conda: "envs/polish_pilon.yaml"
+    shell: "bwa mem -t 30 " + \
+           "assembly_wtdbg2/bwa_pilon/EGYPTREF_wtdbg2.ctg "+\
+           "{input.fastq_r1} {input.fastq_r2} " + \
+           " | samtools sort -@30 -o {output} -"
+
+rule merge_bam_for_polishing_pilon:
+    input: expand("assembly_wtdbg2/bwa_pilon/{lib}.bam", lib=ILLUMINA_LIBS)
+    output: "assembly_wtdbg2/bwa_pilon/sr.srt.bam"
+    conda: "envs/polish_pilon.yaml"
+    shell: "samtools merge {output} {input}"
+
+rule index_bam_for_polishing_pilon:
+    input: "assembly_wtdbg2/bwa_pilon/sr.srt.bam"
+    output: "assembly_wtdbg2/bwa_pilon/sr.srt.bam.bai"
+    conda: "envs/polish_pilon.yaml"
+    shell: "samtools index {input}"
+
+rule polish_with_pilon:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.lay.fa",
+           "assembly_wtdbg2/bwa_pilon/sr.srt.bam",
+           "assembly_wtdbg2/bwa_pilon/sr.srt.bam.bai"
+    output: "assembly_wtdbg2/pilon/pilon.fa"
+    conda: "envs/polish_pilon.yaml"
+    shell: "pilon --genome {input[0]} " + \
+           "      --bam {input[1]} " + \
+           "      --outdir assembly_wtdbg2/pilon/ " + \
+           "      --changes " + \
+           "      --vcf " + \
+           "      --tracks " + \
+           "      --diploid " + \
+           "      --threads 48 " #+ \
+#           "      --targets {} " + \
+
+rule index_bam_for_polishing:
+    input: "assembly_wtdbg2/bwa/sr.srt.bam"
+    output: "assembly_wtdbg2/bwa/sr.srt.bam.bai"
+    conda: "envs/polish_wtdbg.yaml"
+    shell: "samtools index {input}"
+
+rule polish_with_pilon_test:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.2nd.fa",
+           "assembly_wtdbg2/bwa/sr.srt.bam",
+           "assembly_wtdbg2/bwa/sr.srt.bam.bai"
+    output: "assembly_wtdbg2/pilon/pilon.fa"
+    conda: "envs/polish_pilon.yaml"
+    shell: "java -Xmx16G -jar .snakemake/conda/48ff3853/share/pilon-1.23-0/pilon-1.23.jar --genome {input[0]} " + \
+           "      --bam {input[1]} " + \
+           "      --outdir assembly_wtdbg2/pilon/ " + \
+           "      --changes " + \
+           "      --vcf " + \
+           "      --tracks " + \
+           "      --diploid " + \
+           "      --targets ctg3289 "
 
 ################################################################################
 ##### Correcting / improving / scaffolding the assembly using 10X data #########
@@ -263,12 +344,14 @@ rule renaming_barcodes_second_lib:
     conda: "envs/tigmint.yaml"
     shell: "samtools view -h {input} | sed 's/-1$/-2/g' > {output}"
 
+# The third 10X lib gets barcodes *-3 (instead of *-1)
 rule renaming_barcodes_third_lib:
     input: "tigmint/NDHX00201-AK656.reads.sortbx.bam"
     output: "tigmint/NDHX00201-AK656.reads.renamedbx.bam"
     conda: "envs/tigmint.yaml"
     shell: "samtools view -h {input} | sed 's/-1$/-3/g' > {output}"
 
+# The fourth 10X lib gets barcodes *-4 (instead of *-1)
 rule renaming_barcodes_fourth_lib:
     input: "tigmint/NDHX00201-AK657.reads.sortbx.bam"
     output: "tigmint/NDHX00201-AK657.reads.renamedbx.bam"
@@ -310,6 +393,17 @@ rule run_tigmint_cut:
     conda: "envs/tigmint.yaml"
     shell: "tigmint-cut -p8 -o {output} {input[0]} {input[1]}"
 
+rule run_tigmint_cut_different_spanning_molecules:
+    input: "tigmint/EGYPTREFWTDBG2V3.fa",
+           "tigmint/draft.reads.molecule.bed"
+    output: "tigmint/span_{n}/draft.tigmint.fa"
+    conda: "envs/tigmint.yaml"
+    shell: "tigmint-cut -p48 -n {wildcards.n} -o {output} {input[0]} {input[1]}"
+
+N_SPANNING = (str(50*(x+1)) for x in range(9))
+rule run_tigmint_cut_different_spanning_molecules_all:
+    input: expand("tigmint/span_{x}/draft.tigmint.fa",x=N_SPANNING)
+    
 rule run_tigmint:
     input: "tigmint/draft.tigmint.fa"
 
@@ -330,7 +424,6 @@ rule unpack_logranger_reference:
 
 rule run_longranger_wgs:
     input: ref="longranger_wgs/ref/refdata-GRCh38-2.1.0",
-           vcf="variants_GRCh38/EGYPTREF.vcf",
            mro="longranger_wgs/egyptref-multi.mro",
            fastq=expand("10x/{lib}_S1_L00{lane}_R{readnumber}_001.fastq.gz", \
                          lib=[x.split("_")[0] for x in ILLUMINA_10X_LIBS], \
@@ -338,16 +431,46 @@ rule run_longranger_wgs:
     output: "longranger_wgs/longranger.done"
     shell: "cd longranger_wgs; " + \
            "../software/longranger-2.2.2/longranger wgs EGYPTREF egyptref-multi.mro; " + \
-           "touch {output}; "
-    
-#           "../software2/longranger-2.2.2/longranger wgs " + \
-#           "--id {wildcards.lib} " + \
-#           "--reference /scratch/node25_genome_alignment/{input.ref} " + \ 
-#           "--fastqs ../10x " + \
-#           "--sample {wildcards.lib} " + \
-#           "--vcmode freebayes " #+ \
-#           "--precalled {input.vcf}" #+ \
-#           "--sample EGYPTREF; "
+           "cd ..; touch {output}; "
+
+rule get_longranger_phasing_reference:
+    output: temp("longranger_phasing/ref/refdata-GRCh38-2.1.0.tar.gz")
+    shell: "wget -P longranger_phasing/ref " + \
+           "http://cf.10xgenomics.com/supp/genome/refdata-GRCh38-2.1.0.tar.gz"
+
+rule unpack_logranger_phasing_reference:
+    input: "longranger_phasing/ref/refdata-GRCh38-2.1.0.tar.gz"
+    output: directory("longranger_phasing/ref/refdata-GRCh38-2.1.0")
+    shell: "tar -C longranger_phasing/ref -xzvf {input}"
+
+rule symlink_variant_file_for_phasing:
+    input: "/data/lied_egypt_genome/output_wgs/vars.clean.vcf.gz"
+    output: "longranger_phasing/all_egyptians.vcf.gz"
+    shell: "ln -s {input} {output}"
+
+rule extract_egyptref:
+    input: "longranger_phasing/all_egyptians.vcf.gz"
+    output: "longranger_phasing/EGYPTREF.vcf"
+    params: log_base=lambda wildcards, output: output[0][:-4]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input} " + \
+                    "--indv EGYPTREF " + \
+                    "--recode-INFO-all " + \
+                    "--recode " + \
+                    "--out {params.log_base} " + \
+                    "--stdout > {output}"
+
+rule run_longranger_phasing:
+    input: ref="longranger_phasing/ref/refdata-GRCh38-2.1.0",
+           vcf="longranger_phasing/EGYPTREF.vcf",
+           mro="longranger_phasing/egyptref-multi.mro",
+           fastq=expand("10x/{lib}_S1_L00{lane}_R{readnumber}_001.fastq.gz", \
+                         lib=[x.split("_")[0] for x in ILLUMINA_10X_LIBS], \
+                         lane=[4,5,6,7], readnumber=[1,2])
+    output: "longranger_phasing/longranger.done"
+    shell: "cd longranger_phasing; " + \
+           "../software2/longranger-2.2.2/longranger wgs EGYPTREF egyptref-multi.mro; " + \
+           "cd ..; touch {output}; "
 
 
 ################################################################################
