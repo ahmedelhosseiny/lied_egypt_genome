@@ -52,9 +52,23 @@ rule symlink_var_file:
     output: "variant_stats/egyptians.vcf.gz"
     shell: "ln -s {input} {output}"
 
+# Matthias performed mapping against 3366 in FASTA File 
+# /data/lied_egypt_genome/reference/hg38/Homo_sapiens_assembly38.fasta
+# followed by variant calling within the intervals listed in 
+# /data/lied_egypt_genome/reference/hg38/wgs_calling_regions.hg38.interval_list 
+# which are:
+# * 194 sequences primary assembly
+# * 2,069 https://www.ncbi.nlm.nih.gov/assembly/GCA_000786075.2#/def 
+# (https://www.simonsfoundation.org/2013/12/23/simons-genome-diversity-project/)
+# * 525 HLA sequences
+rule cp_calling_info:
+    input: "/data/lied_egypt_genome/reference/hg38/wgs_calling_regions.hg38.interval_list"
+    output: protected("variant_stats/wgs_calling_regions.hg38.interval_list")
+    shell: "cp {input} {output}"
+
 rule num_variants:
     input: "variant_stats/egyptians.vcf.gz"
-    output: "variant_stats/{individual}/num_variants.txt"
+    output: temp("variant_stats/{individual}_num_variants.txt")
     shell: "vcftools --gzvcf {input} " + \
            "         --non-ref-ac 1 " + \
            "         --indv {wildcards.individual} " + \
@@ -63,12 +77,22 @@ rule num_variants:
            " | grep -v '#' | wc -l > {output} "
            
 rule num_variants_all:
-    input: expand("variant_stats/{individual}/num_variants.txt", \
+    input: expand("variant_stats/{individual}_num_variants.txt", \
                   individual=INDIVIDUALS)
+    output: protected("variant_stats/egyptians.insnps")
+    run:
+        i = 0
+        with open(output[0],"w") as f_out:
+            f_out.write("INDV\tN_SNPS\n")
+            for filename in input:
+                with open(filename,"r") as f_in:
+                    for line in f_in:
+                        f_out.write(INDIVIDUALS[i]+"\t"+line)
+                i += 1
 
 rule indv_missingness:
     input: "variant_stats/egyptians.vcf.gz"
-    output: "variant_stats/egyptians.imiss"
+    output: protected("variant_stats/egyptians.imiss")
     params: prefix="variant_stats/egyptians"
     shell: "vcftools --gzvcf {input} " + \
            "         --missing-indv " + \
@@ -76,7 +100,7 @@ rule indv_missingness:
 
 rule site_missingness:
     input: "variant_stats/egyptians.vcf.gz"
-    output: "variant_stats/egyptians.lmiss"
+    output: protected("variant_stats/egyptians.lmiss")
     params: prefix="variant_stats/egyptians"
     shell: "vcftools --gzvcf {input} " + \
            "         --missing-site " + \
@@ -84,7 +108,7 @@ rule site_missingness:
 
 rule heterozygosity:
     input: "variant_stats/egyptians.vcf.gz"
-    output: "variant_stats/egyptians.het"
+    output: protected("variant_stats/egyptians.het")
     params: prefix="variant_stats/egyptians"
     shell: "vcftools --gzvcf {input} " + \
            "         --het " + \
@@ -92,7 +116,7 @@ rule heterozygosity:
 
 rule relatedness:
     input: "variant_stats/egyptians.vcf.gz"
-    output: "variant_stats/egyptians.relatedness"
+    output: protected("variant_stats/egyptians.relatedness")
     params: prefix="variant_stats/egyptians"
     shell: "vcftools --gzvcf {input} " + \
            "         --relatedness " + \
@@ -100,7 +124,7 @@ rule relatedness:
 
 rule relatedness2:
     input: "variant_stats/egyptians.vcf.gz"
-    output: "variant_stats/egyptians.relatedness2"
+    output: protected("variant_stats/egyptians.relatedness2")
     params: prefix="variant_stats/egyptians"
     shell: "vcftools --gzvcf {input} " + \
            "         --relatedness2 " + \
@@ -108,7 +132,7 @@ rule relatedness2:
 
 rule indel_hist:
     input: "variant_stats/egyptians.vcf.gz"
-    output: "variant_stats/egyptians.indel.hist"
+    output: protected("variant_stats/egyptians.indel.hist")
     params: prefix="variant_stats/egyptians"
     shell: "vcftools --gzvcf {input} " + \
            "         --hist-indel-len " + \
@@ -116,7 +140,7 @@ rule indel_hist:
 
 rule indvidual_depth:
     input: "variant_stats/egyptians.vcf.gz"
-    output: "variant_stats/egyptians.idepth"
+    output: protected("variant_stats/egyptians.idepth")
     params: prefix="variant_stats/egyptians"
     shell: "vcftools --gzvcf {input} " + \
            "         --depth " + \
@@ -124,7 +148,7 @@ rule indvidual_depth:
 
 rule site_depth:
     input: "variant_stats/egyptians.vcf.gz"
-    output: "variant_stats/egyptians.ldepth"
+    output: protected("variant_stats/egyptians.ldepth")
     params: prefix="variant_stats/egyptians"
     shell: "vcftools --gzvcf {input} " + \
            "         --site-depth " + \
@@ -132,28 +156,34 @@ rule site_depth:
 
 rule site_depth_mean:
     input: "variant_stats/egyptians.vcf.gz"
-    output: "variant_stats/egyptians.ldepth.mean"
+    output: protected("variant_stats/egyptians.ldepth.mean")
     params: prefix="variant_stats/egyptians"
     shell: "vcftools --gzvcf {input} " + \
            "         --site-mean-depth " + \
            "         --out {params.prefix} " 
 
+rule variants_per_chrom:
+    input: "variant_stats/egyptians.vcf.gz"
+    output: protected("variant_stats/variants_per_chrom.txt")
+    shell: "zcat {input} | grep -v '#' | cut -f 1 | uniq -c > {output}"
+
 rule variant_stats:
     input: expand("variant_stats/egyptians.{stat}", stat=["imiss","lmiss", \
                                             "het","relatedness","relatedness2", \
                                             "indel.hist","idepth", "ldepth", \
-                                            "ldepth.mean"])
+                                            "ldepth.mean","insnps"])
 
-rule symlink_annovar_annotation:
-    input: "/data/lied_egypt_genome/axel/Annovar/final.annotation.txt"
-    output: "variant_stats/egyptians_annovar_annotated.txt"
-    shell: "ln -s {input} {output}"
-
-rule location_annovar_anotated_vars:
-    input: "variant_stats/annovar_annotated.txt"
-    output: "variant_stats/count_location.txt"
-    shell: "cat {input} | sort | uniq | cut -f 6 | sort | uniq -c"
-
+rule variant_stats_boxplots:
+    input: "variant_stats/egyptians.insnps", "variant_stats/egyptians.imiss",
+           "variant_stats/egyptians.idepth", "variant_stats/egyptians.het",
+           "variant_stats/egyptians.indel.hist", 
+           "variant_stats/variants_per_chrom.txt"
+    output: "variant_stats/figures/variant_stats_boxplots.pdf",
+            "variant_stats/figures/variant_stats_missing_vs_het.pdf",
+            "variant_stats/figures/variant_stats_corplot.pdf",
+            "variant_stats/figures/variant_stats_indel_hist.pdf",
+            "variant_stats/figures/variant_stats_var_per_chrom.pdf"
+    script: "scripts/variant_stats_boxplots.R"
 
 ################################################################################
 ##### Population stratification analysis using Eigenstrat (e.g. PC plots) ######
@@ -242,6 +272,9 @@ rule gp_make_pop_annotation:
                 # LU18, LU19, LU2, LU22. LU23, LU9, and Egyptref are from Delta
                 else:
                     f_out.write(egyptian+"\tEGD\tEGY\n")
+            # Then Egyptians from Pagani et al.
+            for egyptian in PAGANI_SAMPLES:
+                f_out.write(egyptian+"\tEGP\tEGY\n")
             # Then the 1000G samples
             for line in f_in:
                 s = line.split("\t")
@@ -264,8 +297,6 @@ rule gp_select_1000g_individual_genotypes:
     conda: "envs/genotype_pcs.yaml"
     shell: "vcftools --gzvcf {input[0]} " + \
                     "--keep {input[1]} " + \
-                    "--min-alleles 2 " + \
-                    "--max-alleles 2 " + \
                     "--maf 0.05 " + \
                     "--hwe 0.000001 " + \
                     "--recode-INFO-all " + \
@@ -286,20 +317,42 @@ rule gp_get_1000g_snps:
     output: "genotype_pcs/snps_chr{chr}.txt"
     shell: "zcat {input} | grep -v '#' | cut -f 1,2 > {output}"
 
-# Split vcf file chromosome-wise
-rule gp_split_vcf_chromosomewise:
-    input: "variant_stats/egyptians.vcf.gz"
-    output: "genotype_pcs/egyptians.chromosome.{chr}.vcf.gz"
-    shell: "zcat {input} | head -n 1000| grep '#' | gzip - > {output}; " + \
-           "zcat {input} | grep -P '^{wildcards.chr}\t' | gzip - >> {output}; "
+# Symlink variant file for genotype pc computation
+rule gp_symlink_var_file:
+    input: "/data/lied_egypt_genome/output_wgs/vars.clean.vcf.gz"
+    output: "genotype_pcs/egyptians.vcf.gz"
+    shell: "ln -s {input} {output}"
 
-rule gp_split_vcf_chromosomewise_all:
-    input: expand("variant_stats/egyptians.chromosome.{chr}.vcf", chr=CHR_GRCh38)
+# Split Egyptian vcf file chromosome-wise; 
+# further, select SNPs called in all Egyptian samples (--max-missing), i.e. 
+# all genotypes ara available
+rule gp_split_vcf_chromosomewise:
+    input: "genotype_pcs/egyptians.vcf.gz"
+    output: "genotype_pcs/egyptians.chromosome.{chr}.vcf"
+    conda: "envs/genotype_pcs.yaml"
+    params: log_base=lambda wildcards, output: output[0][:-4]
+    shell: "vcftools --gzvcf {input} " + \
+                    "--chr chr{wildcards.chr} " + \
+                    "--max-missing 1 " + \
+                    "--recode-INFO-all " + \
+                    "--recode " + \
+                    "--out {params.log_base} " + \
+                    "--stdout > {output[0]}"
+
+# Remove the "chr" from the chromosome names since the SNP calling from Matthias
+# has chr1, chr2,... instead of 1,2,..., which is given in 1000 genomes files
+rule gp_remove_chr:
+    input: "genotype_pcs/egyptians.chromosome.{chr}.vcf"
+    output: "genotype_pcs/egyptians.chromosome.{chr}.vcf.gz"
+    conda: "envs/genotype_pcs.yaml"
+    shell: "cat {input} " + \
+           "| sed 's/^chr{wildcards.chr}/{wildcards.chr}/g' " + \
+           "| bgzip > {output} "
 
 # Here, we select from the SNPs called for the egyptians those, which are also
 # kept from the 1000 genomes samples, i.e. 5% MAF, HWE, bi-allelic
 rule gp_select_matching_egyptian_snps:
-    input: "gebotype_pcs/egyptians.chromosome.{chr}.vcf.gz",
+    input: "genotype_pcs/egyptians.chromosome.{chr}.vcf.gz",
            "genotype_pcs/snps_chr{chr}.txt"
     output: "genotype_pcs/egyptians.chromosome.{chr}.vcf.gz"
     params: log_base=lambda wildcards, output: output[0][:-7]
@@ -330,32 +383,17 @@ rule gp_merge_1000g_with_egyptians:
 
 rule gp_merge_1000g_with_egyptians_all:
     input: expand("genotype_pcs/EGYPT_AFR_EUR.chr{chr}_GRCh38.vcf.gz", \
-                   chr=[str(x) for x in range(1,23)]+["X","Y"])
+                   chr=[str(x) for x in range(1,23)])
 
 # Concatenate the vcf file from several chromosomes
 # --pad-missing: Write '.' in place of missing columns. Useful for joining chrY 
 # with the rest.
 rule gp_concatenate_chr_vcfs:
     input: expand("genotype_pcs/EGYPT_AFR_EUR.chr{chr}_GRCh38.vcf.gz", \
-                   chr=[str(x) for x in range(1,23)]+["X","Y"])
+                   chr=[str(x) for x in range(1,23)])
     output: "genotype_pcs/EGYPT_AFR_EUR_GRCh38.vcf.gz"
     conda: "envs/genotype_pcs.yaml"
     shell: "vcf-concat --pad-missing {input} | bgzip > {output}"
-
-# VCF file for the egyptians only (all chromosomes) here gets annotated with 
-# the rsids from dbsnp
-rule gp_cp_egyptian_vcfs_and_annotate_rsids:
-    input: vcf="variants_GRCh38/egyptians.vcf.gz",
-           vcf_index="variants_GRCh38/egyptians.vcf.gz.tbi",
-           dbsnp="dbsnp_GRCh38/dbsnp.vcf.gz",
-           dbsnp_index="dbsnp_GRCh38/dbsnp.vcf.gz.tbi"
-    output: "genotype_pcs/egyptians.vcf.gz"
-    conda: "envs/genotype_pcs.yaml"
-    shell: "bcftools annotate --annotations {input.dbsnp} " + \
-                             "--columns ID " + \
-                             "--output {output} " + \
-                             "--output-type z " + \
-                             "{input.vcf} "
 
 # Filtering egyptian only variants
 # Additional to maf and number of alleles, we also exclude all SNPs with 
@@ -383,10 +421,22 @@ rule gp_filter_for_egyptian_only_pcs:
                     "--out {params.log_base} " + \
                     "--stdout | bgzip > {output[0]}"
 
+rule gp_vcf_wo_missing_genotypes:
+    input: "genotype_pcs/{set}_GRCh38.vcf.gz"
+    output: "genotype_pcs/{set}_GRCh38_wo_missing.vcf.gz"
+    params: log_base=lambda wildcards, output: output[0][:-7]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--max-missing 1 " + \
+                    "--recode-INFO-all " + \
+                    "--recode " + \
+                    "--out {params.log_base} " + \
+                    "--stdout | bgzip > {output[0]}"
+
 # Converting vcf files to plink binary format (bed/bim/fam) for preparing for
 # Eigenstrat analysis
 rule gp_vcf_to_plink:
-    input: "genotype_pcs/{set}_GRCh38.vcf.gz"
+    input: "genotype_pcs/{set}_GRCh38_wo_missing.vcf.gz"
     output: "genotype_pcs/plink/{set}_GRCh38.bed",
             "genotype_pcs/plink/{set}_GRCh38.bim",
             "genotype_pcs/plink/{set}_GRCh38.fam"
@@ -515,16 +565,35 @@ rule gp_exclude_ld_pruned_snps:
                   "--make-bed " + \
                   "--out {params.out_base}"
 
+# Change missing phenotype to population ID
+rule gp_missing_phenotype_to_population:
+    input: "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.fam",
+           "genotype_pcs/annotation_EGYPT_AFR_EUR_GRCh38.txt"
+    output: "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned_phenotype.fam"
+    run:
+        sample_to_pop = {}
+        pop_to_num = {"EGY": "2", "EUR": "3", "AFR": "4"}
+        with open(input[1],"r") as f_annotation:
+            for line in f_annotation:
+                s = line.strip().split("\t")
+                sample_to_pop[s[0]] = s[2]
+        with open(input[0],"r") as f_fam, open(output[0],"w") as f_out:
+            for line in f_fam:
+                s = line.split(" ")
+                num_pop = pop_to_num[sample_to_pop[s[0]]]
+                f_out.write(" ".join(s[:-1])+" "+num_pop+"\n")
+
 # Conversion from bed/bim/fam to ped/map
 rule gp_convert_to_ped_map:
     input: "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.bed", 
            "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.bim",
-           "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.fam"
+           "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned_phenotype.fam"
     output: "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.ped", 
             "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.map"
     params: in_base = lambda wildcards, input: input[0][:-4]
     conda: "envs/genotype_pcs.yaml"
     shell: "plink2 --bfile {params.in_base} " + \
+                  "--fam {input[2]} " + \
                   "--recode " + \
                   "--out {params.in_base} "
 
@@ -577,28 +646,34 @@ rule gp_ped_to_eigentstrat:
 # -s sigma         : (Default is 6.0) number of standard deviations which an
 #                    individual must exceed, along one of topk top principal
 # 		             components, in order to be removed as an outlier.
-# Watch out: The clusters smartpca.perl scripts is used, but calling the conda
-# smartpca. ploteig seems to not be included in conda, and again is used by 
-# from the cluster. This is not working properly though and not producing the 
-# PDF plot. Probably it would be sufficient to use the smartpca binary.
-rule gp_eigensoft_smartpca:
+rule gp_smartpca_parameter_file:
     input: "genotype_pcs/eigenstrat/{set}_GRCh38.eigenstratgeno",
            "genotype_pcs/eigenstrat/{set}_GRCh38.snp",
            "genotype_pcs/eigenstrat/{set}_GRCh38.ind"
-    output: "genotype_pcs/eigenstrat/{set}_GRCh38.pca",
-            "genotype_pcs/eigenstrat/{set}_GRCh38.eval",
+    output: "genotype_pcs/eigenstrat/{set}_GRCh38.smartpca.params"
+    params: evec="genotype_pcs/eigenstrat/{set}_GRCh38.pca.evec",
+            eval="genotype_pcs/eigenstrat/{set}_GRCh38.eval",
+            iout="genotype_pcs/eigenstrat/{set}_GRCh38.ind"
+    run: 
+        with open(output[0],"w") as f_out:
+            f_out.write("genotypename:    "+input[0]+"\n")
+            f_out.write("snpname:         "+input[1]+"\n") 
+            f_out.write("indivname:       "+input[2]+"\n")
+            f_out.write("evecoutname:     "+params.evec+"\n")
+            f_out.write("evaloutname:     "+params.eval+"\n")
+            f_out.write("numoutevec: 10\n")
+            f_out.write("numoutlieriter: 0\n")
+
+rule gp_eigensoft_smartpca:
+    input: "genotype_pcs/eigenstrat/{set}_GRCh38.eigenstratgeno",
+           "genotype_pcs/eigenstrat/{set}_GRCh38.snp",
+           "genotype_pcs/eigenstrat/{set}_GRCh38.ind",
+           "genotype_pcs/eigenstrat/{set}_GRCh38.smartpca.params"
+    output: "genotype_pcs/eigenstrat/{set}_GRCh38.eval",
             "genotype_pcs/eigenstrat/{set}_GRCh38.log",
-            "genotype_pcs/eigenstrat/{set}_GRCh38.pca.evec",
-    params: out_base = lambda wildcards, output: output[0][:-4]
+            "genotype_pcs/eigenstrat/{set}_GRCh38.pca.evec"
     conda: "envs/genotype_pcs.yaml"
-    shell: "smartpca.perl -i {input[0]} " + \
-                         "-a {input[1]} " + \
-                         "-b {input[2]} " + \
-                         "-o {output[0]} " + \
-                         "-p {params.out_base}.plot " + \
-                         "-e {output[1]} " + \
-                         "-l {output[2]} " + \
-                         "-m 0; "
+    shell: "smartpca -p {input[3]} > {output[1]}"
 
 # Computing the Tracy-Widom statistics to evaluate the statistical 
 # significance of each principal component identified by pca
@@ -647,104 +722,117 @@ rule gp_plot_gt_pcs_egyptians:
 ############ Dealing with annotated variants and filtering them ################
 ################################################################################
 
-# Preprocessing and filtering the Annovar annotated files from Axel, here all
-# variants have been annotated.
+rule av_symlink_annovar_annotation:
+    input: "/data/lied_egypt_genome/axel/Annovar/final.annotation.txt"
+    output: "annovar_annotation/egyptians_annovar_annotated.txt"
+    shell: "ln -s {input} {output}"
+
+# This counts occurrences in the column "Func_refGene"
+rule av_location_annovar_anotated_vars:
+    input: "annovar_annotation/egyptians_annovar_annotated.txt"
+    output: "annovar_annotation/count_location.txt"
+    shell: "cat {input} | sort | uniq | cut -f 6 | sort | uniq -c > {output}"
+
+# Rhis counts occurrences in the column "ExonicFunc_refGene"
+rule av_exonic_effect_annovar_anotated_vars:
+    input: "annovar_annotation/egyptians_annovar_annotated.txt"
+    output: "annovar_annotation/count_exonic_effect.txt"
+    shell: "cat {input} | sort | uniq | cut -f 9 | sort | uniq -c > {output}"   
+
 # Here, first filter variants that are exonic and rare according to no (="NA")
 # or according to low gnomAD_exome_ALL
-rule av_filter_egyptian_variants:
-    input: "data/annovar/sample.{sample}.avinput.hg38_multianno.txt"
-    output: "annovar/sample.{sample}_annovar_egyptian.txt"
+rule av_filter_exonic_rare_variants:
+    input: "annovar_annotation/egyptians_annovar_annotated.txt"
+    output: "annovar_annotation/egyptians_annovar_annotated_exonic_rare.txt"
     run:
         with open (input[0],"r") as f_in, open (output[0],"w") as f_out:
             for line in f_in:
+                s = line.split("\t")
                 if line[:3] == "Chr":
+                    assert(s[5] == "Func_refGene")
+                    assert(s[17] == "gnomAD_exome_ALL")
                     f_out.write(line)
                     continue
-                s = line.split("\t")
                 function = s[5]
-                gnomAD_exome = s[11]
+                gnomAD_exome = s[17]
                 if function == "exonic":
                     if gnomAD_exome in ["NA","."]:
                         f_out.write(line)
                     elif float(gnomAD_exome) <= 0.001:
                         f_out.write(line)
 
-# This is without applying any filtering
-rule av_nofilter_variants:
-    input: "data/annovar/sample.{sample}.avinput.hg38_multianno.txt"
-    output: "annovar/sample.{sample}_annovar_nofilter.txt"
-    shell: "cp {input} {output}"
-
-rule av_nofilter_variants_all:
-    input: expand("annovar/sample.{sample}_annovar_nofilter.txt", \
-                  sample=EGYPT_SAMPLES)
-
 # Filter variants with CADD score greater 20
 rule av_filter_deleterious:
-    input: "annovar/sample.{sample}_annovar_egyptian.txt"
-    output: "annovar/sample.{sample}_annovar_egyptiandeleterious.txt" 
+    input: "annovar_annotation/egyptians_annovar_annotated_exonic_rare.txt"
+    output: "annovar_annotation/egyptians_annovar_annotated_exonic_rare_deleterious.txt"
     run:
         with open (input[0],"r") as f_in, open (output[0],"w") as f_out:
             for line in f_in:
+                s = line.split("\t")
                 if line[:3] == "Chr":
+                    assert s[77] == "CADD_phred"
                     f_out.write(line)
                     continue
-                s = line.split("\t")
-                cadd_phred = s[69]
+                cadd_phred = s[77]
                 if cadd_phred in ["NA","."]:
                     continue
                 if float(cadd_phred) >= 20:
                         f_out.write(line)
 
-# Concatenate the file for all samples, add a 'sample' column and sort by 
-# position
-rule av_concat_files:
-    input: expand("annovar/sample.{sample}_annovar_{{filter}}.txt", \
-                   sample=EGYPT_SAMPLES)
-    output: "annovar/annovar_{filter}.txt"
+# Get chromosome and position of the SNPs; this is better than selecting by rsid
+# because if there are Egyptian SNPs that have no rsid, then they will not be
+# selected from the vcf File later. I checked (using 
+# "cat annovar_annotation/egyptians_annovar_annotated_exonic_rare.txt  | 
+# cut -f 1,2 | uniq -c | grep -v '  1 ' | wc -l") that there are only 13 
+# positions occurring more than once, so this is neglect-able
+rule av_get_snp_ids:
+    input: "annovar_annotation/egyptians_annovar_annotated_exonic_rare.txt"
+    output: "annovar_annotation/snppos_egyptians_annovar_annotated_exonic_rare.txt"
+    shell: "cat {input} | tail -n +2 | cut -f 1,2 > {output}"
+
+# Symlinking the VCF file with Egyptian SNP calling
+rule av_symlink_var_file:
+    input: "/data/lied_egypt_genome/output_wgs/vars.clean.vcf.gz"
+    output: "annovar_annotation/egyptians.vcf.gz"
+    shell: "ln -s {input} {output}"
+
+# We want to select here the SNPs that are exonic and rare BUT are common (i.e.
+# more than 5%) in Egyptians 
+rule av_get_egyptian_common_variants:
+    input: "annovar_annotation/egyptians.vcf.gz",
+           "annovar_annotation/snppos_egyptians_annovar_annotated_exonic_rare.txt"
+    output: "annovar_annotation/egyptians_exonic_rare_egyptiancommon.vcf.gz"
+    params: log_base=lambda wildcards, output: output[0][:-7]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input[0]} "
+                    "--positions {input[1]} " + \
+                    "--mac 3 " + \
+                    "--recode-INFO-all " + \
+                    "--recode " + \
+                    "--out {params.log_base} " + \
+                    "--stdout | bgzip > {output}"
+
+rule av_get_positions_exonic_rare_egyptiancommon:
+    input: "annovar_annotation/egyptians_exonic_rare_egyptiancommon.vcf.gz"
+    output: "annovar_annotation/snppos_egyptians_annovar_annotated_exonic_rare_egyptiancommon.txt"
+    shell: "zcat {input} | grep -v '#' | cut -f 1,2 > {output}"
+
+rule av_get_annotations_exonic_rare_egyptiancommon:
+    input: "annovar_annotation/egyptians_annovar_annotated.txt",
+           "annovar_annotation/snppos_egyptians_annovar_annotated_exonic_rare_egyptiancommon.txt"
+    output: "annovar_annotation/egyptians_annovar_annotated_exonic_rare_egyptiancommon.txt"
     run:
-        out_lines = []
-        i = 0
-        for filename in input:
-            with open (filename,"r") as f_in:
-                for line in f_in:
-                    if line[:3] == "Chr":
-                        header = "Sample\t"+line
-                        continue
-                    sample = filename.split(".")[1].split("_")[0]
-                    s = line.split("\t")
-                    chrom = s[0]
-                    pos = s[1]
-                    out_lines.append([sample]+s)
-            # Sort by sample tertiary
-            out_lines = sorted(out_lines, key=lambda x: x[0])
-            # Sort py position secondary
-            out_lines = sorted(out_lines,key=lambda x: int(x[2]))
-            # Sort by chromosome primarily
-            out_lines = sorted(out_lines,key=lambda x: x[1])
-            with open (output[0],"w") as f_out:
-                f_out.write(header)
-                for elem in out_lines:
-                    f_out.write("\t".join(elem))
+        pos = {}
+        with open(input[1],"r") as f_pos:
+            for line in f_pos:
+                pos[line.strip()] = True
+        with open(input[0],"r") as f_anno, open(output[0],"w") as f_out:
+            for line in f_anno:
+                s = line.split("\t")
+                if s[0]+"\t"+s[1] in pos:
+                    f_out.write(line)
 
-# Filter (deleterious) variants to keep only those in more than one Egyptian
-# Sort the list by chromosome (-k 2 -g -s, .g: numeric, -s: stable to keep 
-# sorting by position) and then numerically by position (-k 3 -g)
-rule av_deleterius_recurrent:
-    input: "annovar/annovar_{filter}.txt"
-    output: "annovar/annovar_{filter}_recurrent.txt"
-    shell: "head -n 1 {input} > {output}; " + \
-           "cat {input} | " + \
-           "cut -f 2-100 | " + \
-           "sort | " + \
-           "uniq -c | " + \
-           "grep -v '      1 ' | " + \
-           "sed -e 's/      //g' | " + \
-           "sed -e 's/     //g' | " + \
-           "sed -e 's/ /\t/1' | " + \
-           "sort -k 3 -g -t \"\t\" | " + \
-           "sort -k 2 -g -t \"\t\" -s >> {output}"
-
-rule av_recurrent_all:
-    input: expand("annovar/annovar_{filter}_recurrent.txt", \
-                  filter=["egyptian","egyptiandeleterious"])
+rule av_exonic_effect_exonic_rare_egyptiancommon:
+    input: "annovar_annotation/egyptians_annovar_annotated_exonic_rare_egyptiancommon.txt"
+    output: "annovar_annotation/count_exonic_effect_exonic_rare_egyptiancommon.txt"
+    shell: "cat {input} | sort | uniq | cut -f 9 | sort | uniq -c > {output}"  

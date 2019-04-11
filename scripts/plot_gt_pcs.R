@@ -58,6 +58,7 @@ pc_col[9] <- rainbow(14)[8]
 pc_col[10] <- rainbow(14)[9]
 pc_col[11] <- rainbow(14)[11]
 pc_col[14] <- "plum1"
+pc_col <- c(pc_col,"beige")
 eig_pc1 <- eigenvalues[1]
 eig_pc2 <- eigenvalues[2]
 eig_pc3 <- eigenvalues[3]
