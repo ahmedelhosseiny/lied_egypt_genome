@@ -67,8 +67,8 @@ rule cp_calling_info:
     shell: "cp {input} {output}"
 
 rule num_variants:
-    input: "variant_stats/egyptians.vcf.gz"
-    output: temp("variant_stats/{individual}_num_variants.txt")
+    input: "{var_type}_stats/egyptians.vcf.gz"
+    output: temp("{var_type}_stats/{individual}_num_variants.txt")
     shell: "vcftools --gzvcf {input} " + \
            "         --non-ref-ac 1 " + \
            "         --indv {wildcards.individual} " + \
@@ -77,9 +77,9 @@ rule num_variants:
            " | grep -v '#' | wc -l > {output} "
            
 rule num_variants_all:
-    input: expand("variant_stats/{individual}_num_variants.txt", \
+    input: expand("{{var_type}}_stats/{individual}_num_variants.txt", \
                   individual=INDIVIDUALS)
-    output: protected("variant_stats/egyptians.insnps")
+    output: protected("{var_type}_stats/egyptians.insnps")
     run:
         i = 0
         with open(output[0],"w") as f_out:
@@ -91,41 +91,41 @@ rule num_variants_all:
                 i += 1
 
 rule indv_missingness:
-    input: "variant_stats/egyptians.vcf.gz"
-    output: protected("variant_stats/egyptians.imiss")
-    params: prefix="variant_stats/egyptians"
+    input: "{var_type}_stats/egyptians.vcf.gz"
+    output: protected("{var_type}_stats/egyptians.imiss")
+    params: prefix="{var_type}_stats/egyptians"
     shell: "vcftools --gzvcf {input} " + \
            "         --missing-indv " + \
            "         --out {params.prefix} " 
 
 rule site_missingness:
-    input: "variant_stats/egyptians.vcf.gz"
-    output: protected("variant_stats/egyptians.lmiss")
-    params: prefix="variant_stats/egyptians"
+    input: "{var_type}_stats/egyptians.vcf.gz"
+    output: protected("{var_type}_stats/egyptians.lmiss")
+    params: prefix="{var_type}_stats/egyptians"
     shell: "vcftools --gzvcf {input} " + \
            "         --missing-site " + \
            "         --out {params.prefix} " 
 
 rule heterozygosity:
-    input: "variant_stats/egyptians.vcf.gz"
-    output: protected("variant_stats/egyptians.het")
-    params: prefix="variant_stats/egyptians"
+    input: "{var_type}_stats/egyptians.vcf.gz"
+    output: protected("{var_type}_stats/egyptians.het")
+    params: prefix="{var_type}_stats/egyptians"
     shell: "vcftools --gzvcf {input} " + \
            "         --het " + \
            "         --out {params.prefix} " 
 
 rule relatedness:
-    input: "variant_stats/egyptians.vcf.gz"
-    output: protected("variant_stats/egyptians.relatedness")
-    params: prefix="variant_stats/egyptians"
+    input: "{var_type}_stats/egyptians.vcf.gz"
+    output: protected("{var_type}_stats/egyptians.relatedness")
+    params: prefix="{var_type}_stats/egyptians"
     shell: "vcftools --gzvcf {input} " + \
            "         --relatedness " + \
            "         --out {params.prefix} "
 
 rule relatedness2:
-    input: "variant_stats/egyptians.vcf.gz"
-    output: protected("variant_stats/egyptians.relatedness2")
-    params: prefix="variant_stats/egyptians"
+    input: "{var_type}_stats/egyptians.vcf.gz"
+    output: protected("{var_type}_stats/egyptians.relatedness2")
+    params: prefix="{var_type}_stats/egyptians"
     shell: "vcftools --gzvcf {input} " + \
            "         --relatedness2 " + \
            "         --out {params.prefix} "
@@ -163,8 +163,8 @@ rule site_depth_mean:
            "         --out {params.prefix} " 
 
 rule variants_per_chrom:
-    input: "variant_stats/egyptians.vcf.gz"
-    output: protected("variant_stats/variants_per_chrom.txt")
+    input: "{var_type}_stats/egyptians.vcf.gz"
+    output: protected("{var_type}_stats/variants_per_chrom.txt")
     shell: "zcat {input} | grep -v '#' | cut -f 1 | uniq -c > {output}"
 
 rule variant_stats:
@@ -836,3 +836,28 @@ rule av_exonic_effect_exonic_rare_egyptiancommon:
     input: "annovar_annotation/egyptians_annovar_annotated_exonic_rare_egyptiancommon.txt"
     output: "annovar_annotation/count_exonic_effect_exonic_rare_egyptiancommon.txt"
     shell: "cat {input} | sort | uniq | cut -f 9 | sort | uniq -c > {output}"  
+
+
+################################################################################
+####### Performing preprocessing and statistics for SVs called by Axel #########
+################################################################################
+
+# Symlinking the SV file with delly SV calls performed by Axel
+rule sv_symlink:
+    input: "/data/lied_egypt_genome/axel/SVs/germline.vcf"
+    output: "sv_stats/egyptians.vcf.gz"
+    shell: "cat {input} | gzip > {output}"
+
+rule sv_stats:
+    input: expand("sv_stats/egyptians.{stat}", stat=["imiss","lmiss", \
+                                            "het","relatedness","relatedness2", \
+                                            "ldepth","ldepth.mean","insnps"])
+
+rule sv_stats_boxplots:
+    input: "sv_stats/egyptians.insnps", "sv_stats/egyptians.imiss",
+           "sv_stats/egyptians.het", "sv_stats/variants_per_chrom.txt"
+    output: "sv_stats/figures/variant_stats_boxplots.pdf",
+            "sv_stats/figures/variant_stats_missing_vs_het.pdf",
+            "sv_stats/figures/variant_stats_corplot.pdf",
+            "sv_stats/figures/variant_stats_var_per_chrom.pdf"
+    script: "scripts/sv_stats_boxplots.R"
