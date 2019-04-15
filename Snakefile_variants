@@ -861,3 +861,121 @@ rule sv_stats_boxplots:
             "sv_stats/figures/variant_stats_corplot.pdf",
             "sv_stats/figures/variant_stats_var_per_chrom.pdf"
     script: "scripts/sv_stats_boxplots.R"
+
+rule split_by_sv_type_dels:
+    input: "sv_stats/egyptians.vcf.gz"
+    output: "sv_stats/egyptians_deletions.vcf"
+    shell: "zcat {input} | grep '#' > {output}; " + \
+           "zcat {input} | grep '<DEL>' >> {output} " 
+
+rule split_by_sv_type_insertions:
+    input: "sv_stats/egyptians.vcf.gz"
+    output: "sv_stats/egyptians_insertions.vcf"
+    shell: "zcat {input} | grep '#' > {output}; " + \
+           "zcat {input} | grep '<INS>' >> {output} " 
+
+rule split_by_sv_type_duplications:
+    input: "sv_stats/egyptians.vcf.gz"
+    output: "sv_stats/egyptians_duplications.vcf"
+    shell: "zcat {input} | grep '#' > {output}; " + \
+           "zcat {input} | grep '<DUP' >> {output} " 
+
+rule split_by_sv_type_inversions:
+    input: "sv_stats/egyptians.vcf.gz"
+    output: "sv_stats/egyptians_inversions.vcf"
+    shell: "zcat {input} | grep '#' > {output}; " + \
+           "zcat {input} | grep '<INV' >> {output} " 
+
+rule split_by_sv_type_translocations:
+    input: "sv_stats/egyptians.vcf.gz"
+    output: "sv_stats/egyptians_translocations.vcf"
+    shell: "zcat {input} | grep '#' > {output}; " + \
+           "zcat {input} | grep -v '<' >> {output} " 
+
+rule split_by_sv_type:
+    input: expand("sv_stats/egyptians_{sv_type}.vcf", \
+                   sv_type=["deletions","insertions","duplications", \
+                            "inversions","translocations"])
+
+rule get_ins_len:
+    input: "sv_stats/egyptians_insertions.vcf"
+    output: "sv_stats/len_insertions_all.txt"
+    shell: "cat {input} | grep -v '#' " + \
+                       "| cut -d ';' -f 12 " + \
+                       "| cut -d '=' -f 2 > {output}"
+
+rule get_ins_len_filtered:
+    input: "sv_stats/egyptians_insertions.vcf"
+    output: "sv_stats/len_insertions_pass.txt"
+    run:
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                if line[0] == "#":
+                    continue
+                # If this is a file considering only "PASS" calls, don't consider
+                # "LowQual" calls (this is the only filter flag except "PASS"
+                if line.split("\t")[6] == "LowQual":
+                    continue
+                f_out.write(line.split(";")[11][7:]+"\n")
+
+rule get_del_inv_dup_len:
+    input: "sv_stats/egyptians_{del_inv_dup}.vcf"
+    output: "sv_stats/len_{del_inv_dup}_{filter}.txt"
+    wildcard_constraints: del_inv_dup="deletions|inversions|duplications",
+                          filter="pass|all"
+    run:
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                if line[0] == "#":
+                    continue
+                s = line.split("\t")
+                # If this is a file considering only "PASS" calls, don't consider
+                # "LowQual" calls (this is the only filter flag except "PASS"
+                if wildcards.filter == "pass":
+                    if s[6] == "LowQual":
+                        continue
+                pos = int(s[1])
+                end = int(s[7].split(";")[4][4:])
+                f_out.write(str(end-pos)+"\n")
+
+rule num_all_translocations:
+    input: "sv_stats/egyptians_translocations.vcf"
+    output: "sv_stats/num_translocations_all.txt"
+    shell: "cat {input} | grep -v '#' | wc -l > {output}"
+
+rule num_pass_translocations:
+    input: "sv_stats/egyptians_translocations.vcf"
+    output: "sv_stats/num_translocations_pass.txt"
+    run:
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            num_trans = 0
+            for line in f_in:
+                if line[0] == "#":
+                    continue
+                # If this is a file considering only "PASS" calls, don't consider
+                # "LowQual" calls (this is the only filter flag except "PASS"
+                if line.split("\t")[6] == "LowQual":
+                    continue
+                else:
+                    num_trans += 1                
+            f_out.write(str(num_trans)+"\n")
+
+# Get the length of the different types of SVs, note that translocations have 
+# no length because they are at the end of the chromosome (or, more precisely,
+# we'd need to consider chromosome length to compute a length)
+rule get_sv_lens:
+    input: expand("sv_stats/len_{del_inv_dup}_{filter}.txt", \
+                   del_inv_dup=["insertions","deletions","inversions","duplications"], \
+                   filter=["all","pass"])
+
+rule plot_sv_len:
+    input: expand("sv_stats/len_{del_inv_dup}_{filter}.txt", \
+                   del_inv_dup=["insertions","deletions","inversions","duplications"], \
+                   filter=["all","pass"]),
+            "sv_stats/num_translocations_all.txt",
+            "sv_stats/num_translocations_pass.txt"
+    output: "sv_stats/figures/len_svs_all.pdf",
+            "sv_stats/figures/len_svs_pass.pdf",
+            "sv_stats/figures/sv_hist_all.pdf",
+            "sv_stats/figures/sv_hist_pass.pdf"
+    script: "scripts/sv_lens.R"
