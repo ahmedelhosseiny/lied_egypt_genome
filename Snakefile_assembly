@@ -242,14 +242,16 @@ rule polish_with_pilon:
            "assembly_wtdbg2/bwa_pilon/sr.srt.bam.bai"
     output: "assembly_wtdbg2/pilon/pilon.fa"
     conda: "envs/polish_pilon.yaml"
-    shell: "pilon --genome {input[0]} " + \
-           "      --bam {input[1]} " + \
-           "      --outdir assembly_wtdbg2/pilon/ " + \
-           "      --changes " + \
-           "      --vcf " + \
-           "      --tracks " + \
-           "      --diploid " + \
-           "      --threads 48 " #+ \
+    shell: "java -Xmx300G -jar " + \
+                ".snakemake/conda/48ff3853/share/pilon-1.23-0/pilon-1.23.jar " + \
+                "--genome {input[0]} " + \
+                "--bam {input[1]} " + \
+                "--outdir assembly_wtdbg2/pilon/ " + \
+                "--changes " + \
+                "--diploid " + \
+                "--threads 30 " #+ \
+#           "      --vcf " + \
+#           "      --tracks " + \
 #           "      --targets {} " + \
 
 rule index_bam_for_polishing:
@@ -264,14 +266,19 @@ rule polish_with_pilon_test:
            "assembly_wtdbg2/bwa/sr.srt.bam.bai"
     output: "assembly_wtdbg2/pilon/pilon.fa"
     conda: "envs/polish_pilon.yaml"
-    shell: "java -Xmx16G -jar .snakemake/conda/48ff3853/share/pilon-1.23-0/pilon-1.23.jar --genome {input[0]} " + \
-           "      --bam {input[1]} " + \
-           "      --outdir assembly_wtdbg2/pilon/ " + \
-           "      --changes " + \
-           "      --vcf " + \
-           "      --tracks " + \
-           "      --diploid " + \
-           "      --targets ctg3289 "
+    shell: "java -Xmx300G -jar " + \
+                ".snakemake/conda/48ff3853/share/pilon-1.23-0/pilon-1.23.jar " + \
+                "--genome {input[0]} " + \
+                "--bam {input[1]} " + \
+                "--outdir assembly_wtdbg2/pilon/ " + \
+                "--changes " + \
+                "--diploid " + \
+                "--threads 30 " #+ \
+#           "      --vcf " + \
+#           "      --tracks " + \
+#           "      --targets {} " + \
+#           "      --targets {wildcards.contig} "
+# ctg3289
 
 ################################################################################
 ##### Correcting / improving / scaffolding the assembly using 10X data #########
@@ -407,6 +414,54 @@ rule run_tigmint_cut_different_spanning_molecules_all:
 rule run_tigmint:
     input: "tigmint/draft.tigmint.fa"
 
+
+################################################################################
+############# Scaffolding using 10X data and the scaffolder arcs ###############
+################################################################################
+
+# For arcs, write text file listing input SAM/BAM filenames
+rule arcs_bam_filename_to_file:
+    input: "tigmint/draft.reads.renamedbx.bam"
+    output: "arcs/bam_file.txt"
+    shell: "echo '{input}' > {output}"
+
+# Run ARCS w default params
+rule run_arcs_for_scaffolding:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.3rd.fa", 
+           "arcs/test.txt"
+    output: "arcs/test_original.gv",
+            "arcs/test.dist.gv",
+    params: out_base=lambda wildcards, output: output[0][:-3]
+    shell: "software2/arcs-1.0.5/bin/arcs " +\
+            "--file={input[0]} " + \
+            "--fofName={input[1]} " + 
+            "--base_name={params.out_base} " #+ \
+#            "--run_verbose"
+
+# Run python script makeTSVfile.py to convert ARCS graph output to 
+# LINKS XXX.tigpair_checkpoint file format
+rule convert_graph_for_links:
+    input: graph = "arcs/test_original.gv",
+           assembly = "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.3rd.fa"
+    output: "arcs/test.tigpair_checkpoint.tsv"
+    shell: "python software2/arcs-1.0.5/bin/makeTSVfile.py " + \
+           "{input.graph} {output} {input.assembly}" 
+
+rule run_links_for_scaffolding:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.3rd.fa", 
+           "arcs/test.tigpair_checkpoint.tsv"
+    output: "arcs/links.txt"
+    params: out_base="arcs/test"
+    conda: "envs/links.yaml"
+    shell: "touch arcs/empty.fof; " + \
+           "LINKS -f {input[0]} " + \
+                 "-s arcs/empty.fof " + \
+                 "-k 20 " + \
+                 "-b {params.out_base} " + \
+                 "-l 5 " + \
+                 "-t 2  " + \
+                 "-a 0.9 " + \
+                 "-x 1 "
 
 ################################################################################
 ##################### Variant calling using 10X data ###########################
