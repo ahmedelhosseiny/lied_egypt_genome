@@ -15,7 +15,7 @@ source activate workflow_lied_egypt_genome
 
 echo "RUNNING SNAKEMAKE WORKFLOW..."
 
-snakemake -p -k -j 5 --rerun-incomplete --use-conda --jobname "{jobid}.{rulename}.sh" --cluster "sbatch --mem 32G --partition=shortterm,longterm --time 3-00:00:00 -c 2 -o log/%j.{rule}.log" gc_get_mapped_egyptref_reads_all
+snakemake -p -k -j 1 --rerun-incomplete --use-conda --jobname "{jobid}.{rulename}.sh" --cluster "sbatch --mem 170G --partition=shortterm,longterm --time 3-00:00:00 -c 2 -o log/%j.{rule}.log" run_links_for_scaffolding
 #snakemake -n --reason --rerun-incomplete -k -j 8 --resources io=4 --use-conda --jobname "{jobid}.{rulename}.sh" --cluster "sbatch --mem 90G --partition=shortterm,longterm --time 3-00:00:00 -c 16 -o log/%j.{rule}.log" --printshellcmds # dotplots_scaffold_vs_chromosomes_all results/repeatmasker_comparison.txt compute_content_and_assembly_numbers comparison_repeatmasker dotplots_scaffold_vs_chromosomes_all
 
 source deactivate

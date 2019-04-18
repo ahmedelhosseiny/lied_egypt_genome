@@ -428,11 +428,11 @@ rule arcs_bam_filename_to_file:
 # Run ARCS w default params
 rule run_arcs_for_scaffolding:
     input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.3rd.fa", 
-           "arcs/test.txt"
-    output: "arcs/test_original.gv",
-            "arcs/test.dist.gv",
+           "arcs/bam_file.txt"
+    output: "arcs/EGYPTREF_original.gv",
+            "arcs/EGYPTREF.dist.gv",
     params: out_base=lambda wildcards, output: output[0][:-3]
-    shell: "software2/arcs-1.0.5/bin/arcs " +\
+    shell: "software/arcs-1.0.5/bin/arcs " +\
             "--file={input[0]} " + \
             "--fofName={input[1]} " + 
             "--base_name={params.out_base} " #+ \
@@ -441,17 +441,17 @@ rule run_arcs_for_scaffolding:
 # Run python script makeTSVfile.py to convert ARCS graph output to 
 # LINKS XXX.tigpair_checkpoint file format
 rule convert_graph_for_links:
-    input: graph = "arcs/test_original.gv",
+    input: graph = "arcs/EGYPTREF_original.gv",
            assembly = "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.3rd.fa"
-    output: "arcs/test.tigpair_checkpoint.tsv"
-    shell: "python software2/arcs-1.0.5/bin/makeTSVfile.py " + \
+    output: "arcs/EGYPTREF.tigpair_checkpoint.tsv"
+    shell: "python software/arcs-1.0.5/bin/makeTSVfile.py " + \
            "{input.graph} {output} {input.assembly}" 
 
 rule run_links_for_scaffolding:
     input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.3rd.fa", 
-           "arcs/test.tigpair_checkpoint.tsv"
+           "arcs/EGYPTREF.tigpair_checkpoint.tsv"
     output: "arcs/links.txt"
-    params: out_base="arcs/test"
+    params: out_base="arcs/EGYPTREF"
     conda: "envs/links.yaml"
     shell: "touch arcs/empty.fof; " + \
            "LINKS -f {input[0]} " + \
@@ -462,6 +462,8 @@ rule run_links_for_scaffolding:
                  "-t 2  " + \
                  "-a 0.9 " + \
                  "-x 1 "
+#           "module load links/v1.8.6; " + \
+#           "singularity exec $LINKS_CONTAINER LINKS -f {input[0]} " + \
 
 ################################################################################
 ##################### Variant calling using 10X data ###########################
