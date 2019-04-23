@@ -237,22 +237,22 @@ rule index_bam_for_polishing_pilon:
     shell: "samtools index {input}"
 
 rule polish_with_pilon:
-    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.lay.fa",
-           "assembly_wtdbg2/bwa_pilon/sr.srt.bam",
-           "assembly_wtdbg2/bwa_pilon/sr.srt.bam.bai"
-    output: "assembly_wtdbg2/pilon/pilon.fa"
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.2nd.fa",
+           "assembly_wtdbg2/bwa/sr.srt.bam",
+           "assembly_wtdbg2/bwa/sr.srt.bam.bai"
+    output: "pilon/pilon.fasta",
+            "pilon/pilon.changes"
+    log: "pilon/pilon.log"
     conda: "envs/polish_pilon.yaml"
     shell: "java -Xmx300G -jar " + \
                 ".snakemake/conda/48ff3853/share/pilon-1.23-0/pilon-1.23.jar " + \
                 "--genome {input[0]} " + \
                 "--bam {input[1]} " + \
-                "--outdir assembly_wtdbg2/pilon/ " + \
+                "--outdir pilon/ " + \
                 "--changes " + \
                 "--diploid " + \
-                "--threads 30 " #+ \
-#           "      --vcf " + \
-#           "      --tracks " + \
-#           "      --targets {} " + \
+                "--threads 30 " + \
+                " > {log} 2>&1 "
 
 rule index_bam_for_polishing:
     input: "assembly_wtdbg2/bwa/sr.srt.bam"
@@ -260,25 +260,49 @@ rule index_bam_for_polishing:
     conda: "envs/polish_wtdbg.yaml"
     shell: "samtools index {input}"
 
-rule polish_with_pilon_test:
+# This is polishing just for one specified contig, which is more for testing 
+# purposes; an example contig is ctg3289
+# Also, this uses the additional option --vcf which outputs a vcf with the 
+# changes and the additional option --tracks, which outputs a number of *.wig
+# files which can be viewed in the IGV (pilon/old/pilonBadCoverage.wig
+# For the whole assembly we don't use these options because files will be huge 
+# and processing takes longer
+rule polish_with_pilon_contigwise:
     input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.2nd.fa",
            "assembly_wtdbg2/bwa/sr.srt.bam",
            "assembly_wtdbg2/bwa/sr.srt.bam.bai"
-    output: "assembly_wtdbg2/pilon/pilon.fa"
+    output: "pilon/{contig}.fasta",
+            "pilon/{contig}.changes",
+            "pilon/{contig}BadCoverage.wig",
+            "pilon/{contig}Changes.wig",
+            "pilon/{contig}ClippedAlignments.wig",
+            "pilon/{contig}CopyNumber.wig",
+            "pilon/{contig}Coverage.wig",
+            "pilon/{contig}DeltaCoverage.wig",
+            "pilon/{contig}DipCoverage.wig",
+            "pilon/{contig}GC.wig",
+            "pilon/{contig}PctBad.wig",
+            "pilon/{contig}PhysicalCoverage.wig",
+            "pilon/{contig}Pilon.bed",
+            "pilon/{contig}Unconfirmed.wig",
+            "pilon/{contig}WeightedMq.wig",
+            "pilon/{contig}WeightedQual.wig"
+    log: "pilon/{contig}.log"
     conda: "envs/polish_pilon.yaml"
     shell: "java -Xmx300G -jar " + \
                 ".snakemake/conda/48ff3853/share/pilon-1.23-0/pilon-1.23.jar " + \
                 "--genome {input[0]} " + \
                 "--bam {input[1]} " + \
-                "--outdir assembly_wtdbg2/pilon/ " + \
+                "--outdir pilon/ " + \
+                "--output {wildcards.contig} " + \
                 "--changes " + \
                 "--diploid " + \
-                "--threads 30 " #+ \
-#           "      --vcf " + \
-#           "      --tracks " + \
-#           "      --targets {} " + \
-#           "      --targets {wildcards.contig} "
-# ctg3289
+                "--threads 30 " + \
+                "--vcf " + \
+                "--tracks " + \
+                "--targets {wildcards.contig} "
+                " > {log} 2>&1 "
+                
 
 ################################################################################
 ##### Correcting / improving / scaffolding the assembly using 10X data #########
@@ -419,9 +443,16 @@ rule run_tigmint:
 ############# Scaffolding using 10X data and the scaffolder arcs ###############
 ################################################################################
 
+# Arcs needs the bam File sorted by readname
+rule readnamesort_bam_filename:
+    input: "tigmint/draft.reads.renamedbx.bam"
+    output: "arcs/draft.reads.namesorted.bam"
+    conda: "envs/tigmint.yaml"
+    shell: "samtools sort -@30 -n -o {output} {input}"
+
 # For arcs, write text file listing input SAM/BAM filenames
 rule arcs_bam_filename_to_file:
-    input: "tigmint/draft.reads.renamedbx.bam"
+    input: "arcs/draft.reads.namesorted.bam"
     output: "arcs/bam_file.txt"
     shell: "echo '{input}' > {output}"
 
@@ -431,7 +462,7 @@ rule run_arcs_for_scaffolding:
            "arcs/bam_file.txt"
     output: "arcs/EGYPTREF_original.gv",
             "arcs/EGYPTREF.dist.gv",
-    params: out_base=lambda wildcards, output: output[0][:-3]
+    params: out_base=lambda wildcards, output: output[0][:-12]
     shell: "software/arcs-1.0.5/bin/arcs " +\
             "--file={input[0]} " + \
             "--fofName={input[1]} " + 
@@ -450,7 +481,7 @@ rule convert_graph_for_links:
 rule run_links_for_scaffolding:
     input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.3rd.fa", 
            "arcs/EGYPTREF.tigpair_checkpoint.tsv"
-    output: "arcs/links.txt"
+    output: "arcs/EGYPTREF.scaffolds.fa"
     params: out_base="arcs/EGYPTREF"
     conda: "envs/links.yaml"
     shell: "touch arcs/empty.fof; " + \
@@ -623,7 +654,10 @@ rule extract_gff_file:
 #     corresponding options). In addition, this mode tries to identify 
 #     misassemblies caused by transposable elements and exclude them from the 
 #     number of misassemblies. See Mikheenko et al., 2018 for more details. 
-ASSEMBLIES = ["EGYPTREFWTDBG2V3","EGYPTREFWTDBG2V2","EGYPTREFWTDBG2","EGYPTREFV2","CEGYPTREFV2","AK1","YORUBA","EGYPTREF","CEGYPTREF"]
+# -o quast_results/latest if you did not specify QUAST output dir with -o option
+#     you can rerun QUAST on the same directory with -o quast_results/latest; 
+#     Watch out: this will reuse previous results quast_results/results_datetime
+ASSEMBLIES = ["EGYPTREFWTDBG2V4","EGYPTREFWTDBG2V3","EGYPTREFWTDBG2V2","EGYPTREFWTDBG2","EGYPTREFV2","CEGYPTREFV2","AK1","YORUBA","EGYPTREF","CEGYPTREF"]
 rule run_quast:
     input: "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa",
            "annotations/Homo_sapiens.GRCh38.94.gff3",
@@ -633,6 +667,7 @@ rule run_quast:
     params: assemblies=lambda wildcards, input:" ".join(input[2:])
     conda: "envs/quast.yaml"
     shell: "quast.py {params.assemblies} " + \
+           "-o quast_results/latest "
            "-r {input[0]} " + \
            "-g gene:{input[1]} " + \
            "-t 48 " + \

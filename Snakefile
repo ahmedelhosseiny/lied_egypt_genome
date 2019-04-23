@@ -222,11 +222,11 @@ rule compute_assembly_stats:
     script: "scripts/compute_assembly_stats.py"
 
 # Computing all info numbers:
-# assembly = ["GRCh38","EGYPTREF","AK1","YORUBA","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"], \
+#           assembly = ["EGYPTREFWTDBG2V4","EGYPTREFWTDBG2V3","EGYPTREFWTDBG2V2","EGYPTREFWTDBG2","GRCh38","EGYPTREF","AK1","YORUBA","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"], \
 rule compute_content_and_assembly_numbers:
     input: expand( \
            "results/{assembly}/{task}_Homo_sapiens.{assembly}.dna.primary_assembly.txt", \
-           assembly = ["EGYPTREFWTDBG2V3","EGYPTREFWTDBG2V2","EGYPTREFWTDBG2","GRCh38","EGYPTREF","AK1","YORUBA","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"], \
+           assembly = ["EGYPTREFWTDBG2V4","EGYPTREFWTDBG2V3","EGYPTREFWTDBG2V2","EGYPTREFWTDBG2","GRCh38","EGYPTREF","AK1","YORUBA","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"], \
            task = ["scaffold_names","num_bases","num_all","assembly_stats"])
 
 
@@ -488,6 +488,24 @@ rule wtdbg2_shortread_polished_assembly:
 rule write_scaffold_fastas_egyptrefwtdbg2v3:
     input: "seq_EGYPTREFWTDBG2V3/Homo_sapiens.EGYPTREFWTDBG2V3.dna.primary_assembly.fa"
     output: expand("seq_EGYPTREFWTDBG2V3/Homo_sapiens.EGYPTREFWTDBG2V3.dna.{scaffold}.fa", \
+                   scaffold=EGYPTREFWTDBG2_SCAFFOLDS)
+    run:
+        with open(input[0], "r") as f_in:
+            i = 0
+            for record in SeqIO.parse(f_in,"fasta"):            
+                with open(output[i], "w") as f_out:
+                    SeqIO.write(record, f_out, "fasta")
+                    i += 1
+
+# For analyzing the pilon-polished assembly
+rule wtdbg2_pilon_polished_assembly:
+    input: "pilon/pilon.fasta"
+    output: "seq_EGYPTREFWTDBG2V4/Homo_sapiens.EGYPTREFWTDBG2V4.dna.primary_assembly.fa"
+    shell: "cp {input} {output}"
+
+rule write_scaffold_fastas_egyptrefwtdbg2v4:
+    input: "seq_EGYPTREFWTDBG2V4/Homo_sapiens.EGYPTREFWTDBG2V4.dna.primary_assembly.fa"
+    output: expand("seq_EGYPTREFWTDBG2V4/Homo_sapiens.EGYPTREFWTDBG2V4.dna.{scaffold}.fa", \
                    scaffold=EGYPTREFWTDBG2_SCAFFOLDS)
     run:
         with open(input[0], "r") as f_in:
