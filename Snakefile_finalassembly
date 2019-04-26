@@ -1,0 +1,594 @@
+#kate:syntax python;
+
+from global_variables import *
+
+
+################################################################################
+##### Constructing an assembly using Pacbio data only ##########################
+################################################################################
+
+
+rule symlink_pacbio:
+    output: directory("data/01.pacbio")
+    shell: "ln -s /data/lied_egypt_genome/raw/P101HW18010820-01_human_2018.08.29/00.data/01.pacbio {output}"
+
+# Making some stats about the overall number of bases etc.
+rule pb_bamstats:
+    input: "data/01.pacbio/{pb_files}.subreads.bam"
+    output: "pacbio/{pb_files}.bamstats"
+    shell: "samtools stats {input} > {output}"
+
+rule pb_bamstats_all:
+    input: expand("pacbio/{pb_files}.bamstats", \
+            pb_files = [item for subl in PACBIO_SAMPLES_TO_SEQRUN_PATH.values() \
+                       for item in subl])
+
+# Conversion of bam to fasta sequences
+rule pb_bam2fasta:
+    input: "data/01.pacbio/{pb_files}.subreads.bam"
+    output: temp("pacbio/{pb_files}.fa")
+    shell: "samtools fasta -t {input} > {output}"
+
+# Constructing one large fasta file
+rule pb_combined_fasta:
+    input: expand("pacbio/{pb_files}.fa", \
+            pb_files = [item for subl in PACBIO_SAMPLES_TO_SEQRUN_PATH.values() \
+                       for item in subl])
+    output: "pacbio/pb_EGYPTREF.fa"
+    shell: "cat {input} > {output}"
+
+# Run assembler wtdbg2
+# WTDBG: De novo assembler for long noisy sequences
+# Author: Jue Ruan <ruanjue@gmail.com>
+# Version: 2.3 (20181206)
+# Usage: wtdbg2 [options] -i <reads.fa> -o <prefix> [reads.fa ...]
+# Options:
+#  -i <string> Long reads sequences file (REQUIRED; can be multiple), []
+#  -o <string> Prefix of output files (REQUIRED), []
+#  -t <int>    Number of threads, 0 for all cores, [4]
+#  -f          Force to overwrite output files
+#  -x <string> Presets, comma delimited, []
+#             rsII/rs: -p 21 -S 4 -s 0.05 -L 5000
+#           sequel/sq
+#        nanopore/ont:
+#             (genome size < 1G)  -p 0 -k 15 -AS 2 -s 0.05 -L 5000
+#             (genome size >= 1G) -p 19 -AS 2 -s 0.05 -L 5000
+#       corrected/ccs: -p 21 -k 0 -AS 4 -K 0.05 -s 0.5
+#              Example: '-e 3 -x ont -S 1' in parsing order, -e will be 3, -S will be 1
+#  -g <number> Approximate genome size (k/m/g suffix allowed) [0]
+#  -X <float>  Choose the best <float> depth from input reads(effective with -g) [50]
+#  -L <int>    Choose the longest subread and drop reads shorter than <int> (5000 recommended for PacBio) [0]
+#              Negative integer indicate keeping read names, e.g. -5000.
+#  -k <int>    Kmer fsize, 0 <= k <= 25, [0]
+#  -p <int>    Kmer psize, 0 <= p <= 25, [21]
+#              k + p <= 25, seed is <k-mer>+<p-homopolymer-compressed>
+#  -K <float>  Filter high frequency kmers, maybe repetitive, [1000.05]
+#              >= 1000 and indexing >= (1 - 0.05) * total_kmers_count
+#  -E <int>    Min kmer frequency, [2]
+#  -S <float>  Subsampling kmers, 1/(<-S>) kmers are indexed, [4.00]
+#              -S is very useful in saving memeory and speeding up
+#              please note that subsampling kmers will have less matched length
+#  -l <float>  Min length of alignment, [2048]
+#  -m <float>  Min matched length by kmer matching, [200]
+#  -A          Keep contained reads during alignment
+#  -s <float>  Min similarity, calculated by kmer matched length / aligned length, [0.05]
+#  -e <int>    Min read depth of a valid edge, [3]
+#  -q          Quiet
+#  -v          Verbose (can be multiple)
+#  -V          Print version information and then exit
+#  --help      Show more options
+# Parameters according to web site (https://github.com/ruanjue/wtdbg2)
+# Dataset 	GSize 	Cov 	Asm options 	CPU asm 	CPU cns 	Real tot 	RAM
+# Human HG00733 	3Gb 	PB x93 	-x sq -g3g -t47 	2114h26m 	152h24m 	52h22m 	338.1G
+rule assembl_with_wtdbg2:
+    input: "pacbio/pb_EGYPTREF.fa"
+    output: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.lay.gz"
+    conda: "envs/wtdbg.yaml"
+    params: out_base=lambda wildcards, output: output[0][:-11]
+    shell: "wtdbg2 -i {input} " + \
+                 " -x sq -g 3g -t 31 " + \
+                 " -o {params.out_base} "
+
+
+################################################################################
+#### Polishing using Pac Bio and subsequently Illumina PE data using pilon #####
+################################################################################
+
+# Mapping the Illumina PE data to the contigs
+# -a STR: Algorithm for constructing BWT index. Chosen option: 
+#         bwtsw: Algorithm implemented in BWT-SW. This method works with the 
+#         whole human genome.
+# -p STR: Prefix of the output database [same as db filename] 
+rule bwa_index_for_polishing_pilon:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.lay.fa"
+    output: "polish_pilon/bwa/EGYPTREF_wtdbg2.ctg.amb",
+            "polish_pilon/bwa/EGYPTREF_wtdbg2.ctg.ann",
+            "polish_pilon/bwa/EGYPTREF_wtdbg2.ctg.bwt",
+            "polish_pilon/bwa/EGYPTREF_wtdbg2.ctg.pac",
+            "polish_pilon/bwa/EGYPTREF_wtdbg2.ctg.sa"
+    conda: "envs/polish_pilon.yaml"
+    shell: "bwa index -a bwtsw " + \
+                     "-p polish_pilon/bwa/EGYPTREF_wtdbg2.ctg " + \
+                     "{input}"
+
+rule bwa_mem_for_polishing_pilon:
+    input: index = "polish_pilon/bwa/EGYPTREF_wtdbg2.ctg.sa",
+           fastq_r1 = "data/02.DES/{lib}_1.fq.gz",
+           fastq_r2 = "data/02.DES/{lib}_2.fq.gz"
+    output: "polish_pilon/bwa/{lib}.bam"
+    conda: "envs/polish_pilon.yaml"
+    shell: "bwa mem -t 32 " + \
+           "polish_pilon/bwa/EGYPTREF_wtdbg2.ctg "+\
+           "{input.fastq_r1} {input.fastq_r2} " + \
+           " | samtools sort -@30 -o {output} - "
+
+rule merge_bam_for_polishing_pilon:
+    input: expand("polish_pilon/bwa/{lib}.bam", lib=ILLUMINA_LIBS)
+    output: "polish_pilon/sr.srt.bam"
+    conda: "envs/polish_pilon.yaml"
+    shell: "samtools merge {output} {input}"
+
+rule index_bam_for_polishing_pilon:
+    input: "polish_pilon/sr.srt.bam"
+    output: "polish_pilon/sr.srt.bam.bai"
+    conda: "envs/polish_pilon.yaml"
+    shell: "samtools index {input}"
+
+# Alternative env location: 48ff3853
+rule polish_with_pilon:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.2nd.fa",
+           "polish_pilon/sr.srt.bam",
+           "polish_pilon/sr.srt.bam.bai"
+    output: "polish_pilon/pilon.fasta",
+            "polish_pilon/pilon.changes"
+    log: "pilon/pilon.log"
+    conda: "envs/polish_pilon.yaml"
+    shell: "java -Xmx300G -jar " + \
+                ".snakemake/conda/59fd21e1/share/pilon-1.23-0/pilon-1.23.jar " + \
+                "--genome {input[0]} " + \
+                "--bam {input[1]} " + \
+                "--outdir polish_pilon/ " + \
+                "--changes " + \
+                "--diploid " + \
+                "--threads 32 " + \
+                " > {log} 2>&1 "
+
+
+################################################################################
+##### Correcting / improving / scaffolding the assembly using 10X data #########
+################################################################################
+
+
+rule symlinking_and_renaming_fastq:
+    input: "/data/lied_egypt_genome/raw/P101HW18010820-01_human_2018.08.29/00.data/03.10X/{lib}_L{lane}_{readnumber}.fq.gz"
+    output: "10x/{lib}_S1_L00{lane}_R{readnumber}_001.fastq.gz"
+    shell: "ln -s {input} {output}"
+
+rule symlinking_and_renaming_fastq_all:
+    input: expand("10x/{name}.fastq.gz", \
+           name = [x.split("_")[0]+"_S1_L00"+x.split("_")[1][1]+"_R1_001" for x in ILLUMINA_10X_LIBS]+ \
+                  [x.split("_")[0]+"_S1_L00"+x.split("_")[1][1]+"_R2_001" for x in ILLUMINA_10X_LIBS])
+
+rule run_longranger_basic:
+    input: expand("10x/{{lib}}_S1_L00{lane}_R{readnumber}_001.fastq.gz", \
+                  lane=[4,5,6,7], readnumber=[1,2])
+    output: "longranger/longranger_{lib}/outs/barcoded.fastq.gz",
+            "longranger/longranger_{lib}/outs/summary.csv"
+    shell: "software2/longranger-2.2.2/longranger basic " + \
+           "--id longranger_{wildcards.lib} " + \
+           "--fastqs 10x " + \
+           "--sample {wildcards.lib}; " + \
+           "mv longranger_{wildcards.lib} longranger/.; "
+
+rule run_longranger_basic_all:
+    input: expand("longranger/longranger_{lib}/outs/barcoded.fastq.gz", \
+           lib = [x.split("_")[0] for x in ILLUMINA_10X_LIBS])
+
+rule index_assembly_for_tigmint:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.3rd.fa"
+    output: "tigmint/EGYPTREFWTDBG2V3.fa",
+            "tigmint/EGYPTREFWTDBG2V3.fa.fai"
+    conda: "envs/tigmint.yaml"
+    shell: "cp {input} {output[0]}; " + \
+           "samtools faidx {output[0]}"
+
+rule bwa_index_for_tigmint:
+    input: "tigmint/EGYPTREFWTDBG2V3.fa",
+           "tigmint/EGYPTREFWTDBG2V3.fa.fai"
+    output: "tigmint/EGYPTREFWTDBG2V3.fa.amb",
+            "tigmint/EGYPTREFWTDBG2V3.fa.ann",
+            "tigmint/EGYPTREFWTDBG2V3.fa.bwt",
+            "tigmint/EGYPTREFWTDBG2V3.fa.pac",
+            "tigmint/EGYPTREFWTDBG2V3.fa.sa"
+    conda: "envs/tigmint.yaml"
+    shell: "bwa index {input[0]}"
+
+rule bwa_mapping_for_tigmint:
+    input: "tigmint/EGYPTREFWTDBG2V3.fa",
+           "longranger/longranger_{lib}/outs/barcoded.fastq.gz",
+           "tigmint/EGYPTREFWTDBG2V3.fa.sa"
+    output: "tigmint/{lib}.reads.sortbx.bam"
+    conda: "envs/tigmint.yaml"
+    shell: "bwa mem -t8 -p -C {input[0]} {input[1]} |" + \
+           "samtools sort -@8 -tBX -o {output}"
+
+# The first 10X lib doesn't need barcode renaming
+rule renaming_barcodes_first_lib:
+    input: "tigmint/NDHX00201-AK654.reads.sortbx.bam"
+    output: "tigmint/NDHX00201-AK654.reads.renamedbx.sam"
+    shell: "samtools view {input} > {output}"
+
+# The second 10X lib gets barcodes *-2 (instead of *-1)
+rule renaming_barcodes_second_lib:
+    input: "tigmint/NDHX00201-AK655.reads.sortbx.bam"
+    output: "tigmint/NDHX00201-AK655.reads.renamedbx.sam"
+    conda: "envs/tigmint.yaml"
+    shell: "samtools view -h {input} | sed 's/-1$/-2/g' > {output}"
+
+# The third 10X lib gets barcodes *-3 (instead of *-1)
+rule renaming_barcodes_third_lib:
+    input: "tigmint/NDHX00201-AK656.reads.sortbx.bam"
+    output: "tigmint/NDHX00201-AK656.reads.renamedbx.sam"
+    conda: "envs/tigmint.yaml"
+    shell: "samtools view -h {input} | sed 's/-1$/-3/g' > {output}"
+
+# The fourth 10X lib gets barcodes *-4 (instead of *-1)
+rule renaming_barcodes_fourth_lib:
+    input: "tigmint/NDHX00201-AK657.reads.sortbx.bam"
+    output: "tigmint/NDHX00201-AK657.reads.renamedbx.sam"
+    conda: "envs/tigmint.yaml"
+    shell: "samtools view -h {input} | sed 's/-1$/-4/g' > {output}"
+
+rule merge_bam_files_for_tigmint:
+    input: expand("tigmint/{lib}.reads.renamedbx.sam", \
+           lib = [x.split("_")[0] for x in ILLUMINA_10X_LIBS])
+    output: "tigmint/draft.reads.renamedbx.sam"
+    conda: "envs/tigmint.yaml"
+    shell: "samtools merge -@32 -tBX {output[0]} {input}"
+
+rule run_tigmint_molecule_single_10xlib:
+    input: "tigmint/{lib}.reads.sortbx.sam"
+    output: "tigmint/{lib}.reads.molecule.bed"
+    conda: "envs/tigmint.yaml"
+    shell: "tigmint-molecule {input} | " + \
+         "sort -k1,1 -k2,2n -k3,3n > {output}"
+
+rule run_tigmint_cut_single_10xlib:
+    input: "tigmint/EGYPTREFWTDBG2V3.fa",
+           "tigmint/{lib}.reads.molecule.bed"
+    output: "tigmint/{lib}.tigmint.fa"
+    conda: "envs/tigmint.yaml"
+    shell: "tigmint-cut -p8 -o {output} {input[0]} {input[1]}"
+
+rule run_tigmint_molecule:
+    input: "tigmint/draft.reads.renamedbx.sam"
+    output: "tigmint/draft.reads.molecule.bed"
+    conda: "envs/tigmint.yaml"
+    shell: "tigmint-molecule {input} | " + \
+         "sort -k1,1 -k2,2n -k3,3n > {output}"
+
+rule run_tigmint_cut:
+    input: "tigmint/EGYPTREFWTDBG2V3.fa",
+           "tigmint/draft.reads.molecule.bed"
+    output: "tigmint/draft.tigmint.fa"
+    conda: "envs/tigmint.yaml"
+    shell: "tigmint-cut -p8 -o {output} {input[0]} {input[1]}"
+
+rule run_tigmint_cut_different_spanning_molecules:
+    input: "tigmint/EGYPTREFWTDBG2V3.fa",
+           "tigmint/draft.reads.molecule.bed"
+    output: "tigmint/span_{n}/draft.tigmint.fa"
+    conda: "envs/tigmint.yaml"
+    shell: "tigmint-cut -p48 -n {wildcards.n} -o {output} {input[0]} {input[1]}"
+
+N_SPANNING = (str(50*(x+1)) for x in range(9))
+rule run_tigmint_cut_different_spanning_molecules_all:
+    input: expand("tigmint/span_{x}/draft.tigmint.fa",x=N_SPANNING)
+    
+rule run_tigmint:
+    input: "tigmint/draft.tigmint.fa"
+
+
+################################################################################
+############# Scaffolding using 10X data and the scaffolder arcs ###############
+################################################################################
+
+# Tigmint and arcs/arks use natively the interleaved fastq produced by 
+# longranger basic. Here, we re-barcode these files to distinguish between the 
+# 4 different library preps
+# The first 10X lib doesn't need barcode renaming
+# The second 10X lib gets barcodes *-2 (instead of *-1)
+# The third 10X lib gets barcodes *-3 (instead of *-1)
+# The fourth 10X lib gets barcodes *-4 (instead of *-1)
+rule renaming_barcodes_fastq:
+    input: "longranger/longranger_NDHX00201-AK654/outs/barcoded.fastq.gz",
+           "longranger/longranger_NDHX00201-AK655/outs/barcoded.fastq.gz",
+           "longranger/longranger_NDHX00201-AK656/outs/barcoded.fastq.gz",
+           "longranger/longranger_NDHX00201-AK657/outs/barcoded.fastq.gz"
+    output: "arks/reads.fq.gz"
+    shell: "cp {input[0]} {output}; " + \
+           "zcat {input[1]} | sed 's/-1$/-2/g' | gzip >> {output}; " + \
+           "zcat {input[2]} | sed 's/-1$/-3/g' | gzip >> {output}; " + \
+           "zcat {input[3]} | sed 's/-1$/-4/g' | gzip >> {output}; "
+
+# Run arks-make
+rule run_arks_make:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.3rd.fa", 
+           "arks/reads.fq.gz"
+    output: "arks/EGYPTREF.scaffolds.fa"
+    conda: "envs/links.yaml"
+    params: draft_prefix=lambda wildcards, input: input[0][:-3],
+            reads_base=lambda wildcards, input: input[1][:-6]
+    shell: "export PATH=software/arks-1.0.3/bin:$PATH; " + \
+           "export PATH=software/arks-1.0.3/Examples:$PATH; " + \
+           "software/arks-1.0.3/Examples/arks-make arks " + \
+           "draft={params.draft_prefix} " + \
+           "reads={params.reads_base} " + \
+           "j=0.5 "+ \
+           "threads=30"
+    
+# Arcs needs the bam File sorted by readname
+# -m 4G : increase the argument for maxMem via -m. This will reduce the number 
+#         of temporary files; otherwise error "Too many open files" (tries to
+#         open 3600 files, possible is 1024.
+rule readnamesort_bam_filename:
+    input: "tigmint/draft.reads.renamedbx.bam"
+    output: "arcs/draft.reads.namesorted.bam"
+    conda: "envs/tigmint.yaml"
+    shell: "samtools sort -@30 -m 8G -n -o {output} {input}"
+
+# For arcs, write text file listing input SAM/BAM filenames
+rule arcs_bam_filename_to_file:
+    input: "arcs/draft.reads.namesorted.bam"
+    output: "arcs/bam_file.txt"
+    shell: "echo '{input}' > {output}"
+
+# Run ARCS w default params
+#   -f, --file=FILE       FASTA file of contig sequences to scaffold [optional]
+#   -a, --fofName=FILE    text file listing input SAM/BAM filenames
+#   -s, --seq_id=N        min sequence identity for read alignments [98]
+#   -c, --min_reads=N     min aligned read pairs per barcode mapping [5]
+#   -l, --min_links=N     min shared barcodes between contigs [0]
+#   -z, --min_size=N      min contig length [500]
+#   -b, --base_name=STR   output file prefix
+#   -g, --graph=FILE      write the ABySS dist.gv to FILE
+#       --gap=N           fixed gap size for ABySS dist.gv file [100]
+#       --tsv=FILE        write graph in TSV format to FILE
+#       --barcode-counts=FILE       write number of reads per barcode to FILE
+#   -m, --index_multiplicity=RANGE  barcode multiplicity range [50-10000]
+#   -d, --max_degree=N    max node degree in scaffold graph [0]
+#   -e, --end_length=N    contig head/tail length for masking alignments [30000]
+#   -r, --error_percent=N p-value for head/tail assignment and link orientation
+#                         (lower is more stringent) [0.05]
+#   -v, --run_verbose     verbose logging
+rule run_arcs_for_scaffolding:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.3rd.fa", 
+           "arcs/bam_file.txt"
+    output: "arcs/EGYPTREF_original.gv",
+            "arcs/EGYPTREF.dist.gv",
+            "arcs/EGYPTREF_barcodecounts.txt"
+    params: out_base=lambda wildcards, output: output[0][:-12]
+    shell: "software/arcs-1.0.5/bin/arcs " +\
+            "--file={input[0]} " + \
+            "--fofName={input[1]} " + \
+            "--base_name={params.out_base} " + \
+            "--barcode-counts={output[2]} " + \
+            "-v "
+
+# Run python script makeTSVfile.py to convert ARCS graph output to 
+# LINKS XXX.tigpair_checkpoint file format
+rule convert_graph_for_links:
+    input: graph = "arcs/EGYPTREF_original.gv",
+           assembly = "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.3rd.fa"
+    output: "arcs/EGYPTREF.tigpair_checkpoint.tsv"
+    shell: "python software/arcs-1.0.5/bin/makeTSVfile.py " + \
+           "{input.graph} {output} {input.assembly}" 
+
+#-f  sequences to scaffold (Multi-FASTA format, required)
+#-s  file-of-filenames, full path to long sequence reads or MPET pairs [see below] (Multi-FASTA/fastq format, required)
+#-k  k-mer value (default -k 15, optional)
+#-t  step of sliding window when extracting k-mer pairs from long reads (default -t 2, optional)
+#	 Multiple steps are separated by comma. eg. -t 10,5
+#-l  minimum number of links (k-mer pairs) to compute scaffold (default -l 5, optional)
+#-a  maximum link ratio between two best contig pairs (default -a 0.3, optional)
+#	 *higher values lead to least accurate scaffolding*
+#-b  base name for your output files (optional)
+#-x  Turn off Bloom filter functionality (-x 1 = yes, default = no, optional)
+#-v  Runs in verbose mode (-v 1 = yes, default = no, optional)
+rule run_links_for_scaffolding:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.3rd.fa", 
+           "arcs/EGYPTREF.tigpair_checkpoint.tsv"
+    output: "arcs/EGYPTREF.scaffolds.fa"
+    params: out_base="arcs/EGYPTREF"
+    conda: "envs/links.yaml"
+    shell: "touch arcs/empty.fof; " + \
+           "LINKS -f {input[0]} " + \
+                 "-s arcs/empty.fof " + \
+                 "-k 20 " + \
+                 "-b {params.out_base} " + \
+                 "-t 2  " + \
+                 "-l 5 " + \
+                 "-a 0.9 " + \
+                 "-x 1 "
+#           "module load links/v1.8.6; " + \
+#           "singularity exec $LINKS_CONTAINER LINKS -f {input[0]} " + \
+
+################################################################################
+##################### Variant calling using 10X data ###########################
+################################################################################
+
+rule get_longranger_reference:
+    output: temp("longranger_wgs/ref/refdata-GRCh38-2.1.0.tar.gz")
+    shell: "wget -P longranger_wgs/ref " + \
+           "http://cf.10xgenomics.com/supp/genome/refdata-GRCh38-2.1.0.tar.gz"
+
+rule unpack_logranger_reference:
+    input: "longranger_wgs/ref/refdata-GRCh38-2.1.0.tar.gz"
+    output: directory("longranger_wgs/ref/refdata-GRCh38-2.1.0")
+    shell: "tar -C longranger_wgs/ref -xzvf {input}"
+
+rule run_longranger_wgs:
+    input: ref="longranger_wgs/ref/refdata-GRCh38-2.1.0",
+           mro="longranger_wgs/egyptref-multi.mro",
+           fastq=expand("10x/{lib}_S1_L00{lane}_R{readnumber}_001.fastq.gz", \
+                         lib=[x.split("_")[0] for x in ILLUMINA_10X_LIBS], \
+                         lane=[4,5,6,7], readnumber=[1,2])
+    output: "longranger_wgs/longranger.done"
+    shell: "cd longranger_wgs; " + \
+           "../software/longranger-2.2.2/longranger wgs EGYPTREF egyptref-multi.mro; " + \
+           "cd ..; touch {output}; "
+
+rule get_longranger_phasing_reference:
+    output: temp("longranger_phasing/ref/refdata-GRCh38-2.1.0.tar.gz")
+    shell: "wget -P longranger_phasing/ref " + \
+           "http://cf.10xgenomics.com/supp/genome/refdata-GRCh38-2.1.0.tar.gz"
+
+rule unpack_logranger_phasing_reference:
+    input: "longranger_phasing/ref/refdata-GRCh38-2.1.0.tar.gz"
+    output: directory("longranger_phasing/ref/refdata-GRCh38-2.1.0")
+    shell: "tar -C longranger_phasing/ref -xzvf {input}"
+
+rule symlink_variant_file_for_phasing:
+    input: "/data/lied_egypt_genome/output_wgs/vars.clean.vcf.gz"
+    output: "longranger_phasing/all_egyptians.vcf.gz"
+    shell: "ln -s {input} {output}"
+
+rule extract_egyptref:
+    input: "longranger_phasing/all_egyptians.vcf.gz"
+    output: "longranger_phasing/EGYPTREF.vcf"
+    params: log_base=lambda wildcards, output: output[0][:-4]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input} " + \
+                    "--indv EGYPTREF " + \
+                    "--recode-INFO-all " + \
+                    "--recode " + \
+                    "--out {params.log_base} " + \
+                    "--stdout > {output}"
+
+rule run_longranger_phasing:
+    input: ref="longranger_phasing/ref/refdata-GRCh38-2.1.0",
+           vcf="longranger_phasing/EGYPTREF.vcf",
+           mro="longranger_phasing/egyptref-multi.mro",
+           fastq=expand("10x/{lib}_S1_L00{lane}_R{readnumber}_001.fastq.gz", \
+                         lib=[x.split("_")[0] for x in ILLUMINA_10X_LIBS], \
+                         lane=[4,5,6,7], readnumber=[1,2])
+    output: "longranger_phasing/longranger.done"
+    shell: "cd longranger_phasing; " + \
+           "../software2/longranger-2.2.2/longranger wgs EGYPTREF egyptref-multi.mro; " + \
+           "cd ..; touch {output}; "
+
+
+################################################################################
+##################### Mapping 10X data against reference #######################
+################################################################################
+
+rule cp_ref_for_bwa_10x:
+    input: "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa",
+           "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.fai"
+    output: "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa",
+           "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.fai"
+    shell: "cp {input[0]} {output[0]}; " + \
+           "cp {input[1]} {output[1]} "
+
+rule bwa_index_10x_for_grch38:
+    input: "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa",
+           "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.fai"
+    output: "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.amb",
+            "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.ann",
+            "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.bwt",
+            "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.pac",
+            "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.sa"
+    params: prefix="map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa"
+    conda: "envs/tigmint.yaml"
+    shell: "bwa index -p {params.prefix} {input[0]}"
+
+# -p  Smart pairing. If two adjacent reads have the same name, they are 
+#     considered to form a read pair. This way, paired-end and single-end reads 
+#     can  be mixed in a single FASTA/Q stream.
+# -C  Append append FASTA/Q comment to SAM output. This option can be used to 
+#     transfer read meta information (e.g. barcode) to the SAM output. Note 
+#     that the  FASTA/Q comment (the string after a space in the header line) 
+#     must conform the SAM spec (e.g. BC:Z:CGTAC). Malformated comments lead to 
+#     incorrect SAM output.
+rule bwa_mapping_10x_against_grch38:
+    input: "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa",
+           "longranger/longranger_{lib}/outs/barcoded.fastq.gz",
+           "map_10x_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.sa"
+    output: "map_10x_GRCh38/{lib}.bam"
+    conda: "envs/tigmint.yaml"
+    shell: "bwa mem -t 48 -p -C {input[0]} {input[1]} |" + \
+           "samtools sort -@48 -o {output}"
+
+rule bwa_mapping_10x_against_grch38_all_libs:
+    input: expand("map_10x_GRCh38/{lib}.bam", \
+           lib = [x.split("_")[0] for x in ILLUMINA_10X_LIBS])
+
+
+################################################################################
+################## Mapping PacBio data against reference #######################
+################################################################################
+
+rule minimap_mapping_pb_against_grch38:
+    input: "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa",
+           "pacbio/pb_EGYPTREF.fa"
+    output: temp("map_pb_GRCh38/EGYPTREF.bam")
+    conda: "envs/polish_wtdbg.yaml"
+    shell: "minimap2 -t 48 -x map-pb -a {input[0]} {input[1]} | " + \
+           "samtools view -Sb - > {output} "
+
+rule minimap_sort_pb_grch38:
+    input: "map_pb_GRCh38/EGYPTREF.bam"
+    output: "map_pb_GRCh38/EGYPTREF.srt.bam"
+    conda: "envs/polish_wtdbg.yaml"
+    shell: "samtools sort -@48 {input} -o {output} "
+
+
+################################################################################
+################## Assembly quality assessment using Quast #####################
+################################################################################
+
+rule get_gff_file:
+    output: temp("annotations/Homo_sapiens.GRCh38.94.gff3.gz")
+    shell: "wget -P annotations ftp://ftp.ensembl.org/pub/release-94/gff3/homo_sapiens/Homo_sapiens.GRCh38.94.gff3.gz"
+
+rule extract_gff_file:
+    input:  "annotations/Homo_sapiens.GRCh38.94.gff3.gz"
+    output: "annotations/Homo_sapiens.GRCh38.94.gff3"
+    shell: "gzip -cdk {input} > {output}"
+
+# -r  Reference genome file. Optional. Many metrics can't be evaluated without 
+#     a reference. If this is omitted, QUAST will only report the metrics that 
+#     can be evaluated without a reference
+# -g  File with genomic feature positions in the reference genome. If you use 
+#     GFF format and would like to count only a specific feature from it (e.g., 
+#     only "CDS" or only "gene") you can specify this feature followed by a 
+#     colon (":") as the filepath prefix (do not use spaces!). 
+# -t  Number of threads
+# --large Genome is large (typically > 100 Mbp). Use optimal parameters for 
+#     evaluation of large genomes. Affects speed and accuracy. In particular, 
+#     imposes --eukaryote --min-contig 3000 --min-alignment 500 
+#     --extensive-mis-size 7000 (can be overridden manually with the 
+#     corresponding options). In addition, this mode tries to identify 
+#     misassemblies caused by transposable elements and exclude them from the 
+#     number of misassemblies. See Mikheenko et al., 2018 for more details. 
+# -o quast_results/latest if you did not specify QUAST output dir with -o option
+#     you can rerun QUAST on the same directory with -o quast_results/latest; 
+#     Watch out: this will reuse previous results quast_results/results_datetime
+ASSEMBLIES = ["EGYPTREFWTDBG2V4","EGYPTREFWTDBG2V3","EGYPTREFWTDBG2V2","EGYPTREFWTDBG2","EGYPTREFV2","CEGYPTREFV2","AK1","YORUBA","EGYPTREF","CEGYPTREF"]
+rule run_quast:
+    input: "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa",
+           "annotations/Homo_sapiens.GRCh38.94.gff3",
+           expand("seq_{a}/Homo_sapiens.{a}.dna.primary_assembly.fa", \
+                  a=ASSEMBLIES)
+    output: "quast_results/quast.done"
+    params: assemblies=lambda wildcards, input:" ".join(input[2:])
+    conda: "envs/quast.yaml"
+    shell: "quast.py {params.assemblies} " + \
+           "-o quast_results/latest "
+           "-r {input[0]} " + \
+           "-g gene:{input[1]} " + \
+           "-t 48 " + \
+           "--large " + \
+           "--memory-efficient " + \
+           "--circos; " + \
+           "touch {output} "
