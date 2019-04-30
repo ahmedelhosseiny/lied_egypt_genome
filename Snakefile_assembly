@@ -365,39 +365,39 @@ rule bwa_mapping_for_tigmint:
 # The first 10X lib doesn't need barcode renaming
 rule renaming_barcodes_first_lib:
     input: "tigmint/NDHX00201-AK654.reads.sortbx.bam"
-    output: "tigmint/NDHX00201-AK654.reads.renamedbx.bam"
-    shell: "cp {input} {output}"
+    output: "tigmint/NDHX00201-AK654.reads.renamedbx.sam"
+    shell: "samtools view {input} > {output}"
 
 # The second 10X lib gets barcodes *-2 (instead of *-1)
 rule renaming_barcodes_second_lib:
     input: "tigmint/NDHX00201-AK655.reads.sortbx.bam"
-    output: "tigmint/NDHX00201-AK655.reads.renamedbx.bam"
+    output: "tigmint/NDHX00201-AK655.reads.renamedbx.sam"
     conda: "envs/tigmint.yaml"
     shell: "samtools view -h {input} | sed 's/-1$/-2/g' > {output}"
 
 # The third 10X lib gets barcodes *-3 (instead of *-1)
 rule renaming_barcodes_third_lib:
     input: "tigmint/NDHX00201-AK656.reads.sortbx.bam"
-    output: "tigmint/NDHX00201-AK656.reads.renamedbx.bam"
+    output: "tigmint/NDHX00201-AK656.reads.renamedbx.sam"
     conda: "envs/tigmint.yaml"
     shell: "samtools view -h {input} | sed 's/-1$/-3/g' > {output}"
 
 # The fourth 10X lib gets barcodes *-4 (instead of *-1)
 rule renaming_barcodes_fourth_lib:
     input: "tigmint/NDHX00201-AK657.reads.sortbx.bam"
-    output: "tigmint/NDHX00201-AK657.reads.renamedbx.bam"
+    output: "tigmint/NDHX00201-AK657.reads.renamedbx.sam"
     conda: "envs/tigmint.yaml"
     shell: "samtools view -h {input} | sed 's/-1$/-4/g' > {output}"
 
 rule merge_bam_files_for_tigmint:
-    input: expand("tigmint/{lib}.reads.renamedbx.bam", \
+    input: expand("tigmint/{lib}.reads.renamedbx.sam", \
            lib = [x.split("_")[0] for x in ILLUMINA_10X_LIBS])
-    output: "tigmint/draft.reads.renamedbx.bam"
+    output: "tigmint/draft.reads.renamedbx.sam"
     conda: "envs/tigmint.yaml"
     shell: "samtools merge -@32 -tBX {output[0]} {input}"
 
 rule run_tigmint_molecule_single_10xlib:
-    input: "tigmint/{lib}.reads.sortbx.bam"
+    input: "tigmint/{lib}.reads.sortbx.sam"
     output: "tigmint/{lib}.reads.molecule.bed"
     conda: "envs/tigmint.yaml"
     shell: "tigmint-molecule {input} | " + \
@@ -411,7 +411,7 @@ rule run_tigmint_cut_single_10xlib:
     shell: "tigmint-cut -p8 -o {output} {input[0]} {input[1]}"
 
 rule run_tigmint_molecule:
-    input: "tigmint/draft.reads.renamedbx.bam"
+    input: "tigmint/draft.reads.renamedbx.sam"
     output: "tigmint/draft.reads.molecule.bed"
     conda: "envs/tigmint.yaml"
     shell: "tigmint-molecule {input} | " + \
@@ -443,12 +443,49 @@ rule run_tigmint:
 ############# Scaffolding using 10X data and the scaffolder arcs ###############
 ################################################################################
 
+# Tigmint and arcs/arks use natively the interleaved fastq produced by 
+# longranger basic. Here, we re-barcode these files to distinguish between the 
+# 4 different library preps
+# The first 10X lib doesn't need barcode renaming
+# The second 10X lib gets barcodes *-2 (instead of *-1)
+# The third 10X lib gets barcodes *-3 (instead of *-1)
+# The fourth 10X lib gets barcodes *-4 (instead of *-1)
+rule renaming_barcodes_fastq:
+    input: "longranger/longranger_NDHX00201-AK654/outs/barcoded.fastq.gz",
+           "longranger/longranger_NDHX00201-AK655/outs/barcoded.fastq.gz",
+           "longranger/longranger_NDHX00201-AK656/outs/barcoded.fastq.gz",
+           "longranger/longranger_NDHX00201-AK657/outs/barcoded.fastq.gz"
+    output: "arks/reads.fq.gz"
+    shell: "cp {input[0]} {output}; " + \
+           "zcat {input[1]} | sed 's/-1$/-2/g' | gzip >> {output}; " + \
+           "zcat {input[2]} | sed 's/-1$/-3/g' | gzip >> {output}; " + \
+           "zcat {input[3]} | sed 's/-1$/-4/g' | gzip >> {output}; "
+
+# Run arks-make
+rule run_arks_make:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.3rd.fa", 
+           "arks/reads.fq.gz"
+    output: "arks/EGYPTREF.scaffolds.fa"
+    conda: "envs/links.yaml"
+    params: draft_prefix=lambda wildcards, input: input[0][:-3],
+            reads_base=lambda wildcards, input: input[1][:-6]
+    shell: "export PATH=software/arks-1.0.3/bin:$PATH; " + \
+           "export PATH=software/arks-1.0.3/Examples:$PATH; " + \
+           "software/arks-1.0.3/Examples/arks-make arks " + \
+           "draft={params.draft_prefix} " + \
+           "reads={params.reads_base} " + \
+           "j=0.5 "+ \
+           "threads=30"
+    
 # Arcs needs the bam File sorted by readname
+# -m 4G : increase the argument for maxMem via -m. This will reduce the number 
+#         of temporary files; otherwise error "Too many open files" (tries to
+#         open 3600 files, possible is 1024.
 rule readnamesort_bam_filename:
     input: "tigmint/draft.reads.renamedbx.bam"
     output: "arcs/draft.reads.namesorted.bam"
     conda: "envs/tigmint.yaml"
-    shell: "samtools sort -@30 -n -o {output} {input}"
+    shell: "samtools sort -@30 -m 8G -n -o {output} {input}"
 
 # For arcs, write text file listing input SAM/BAM filenames
 rule arcs_bam_filename_to_file:
@@ -457,17 +494,36 @@ rule arcs_bam_filename_to_file:
     shell: "echo '{input}' > {output}"
 
 # Run ARCS w default params
+#   -f, --file=FILE       FASTA file of contig sequences to scaffold [optional]
+#   -a, --fofName=FILE    text file listing input SAM/BAM filenames
+#   -s, --seq_id=N        min sequence identity for read alignments [98]
+#   -c, --min_reads=N     min aligned read pairs per barcode mapping [5]
+#   -l, --min_links=N     min shared barcodes between contigs [0]
+#   -z, --min_size=N      min contig length [500]
+#   -b, --base_name=STR   output file prefix
+#   -g, --graph=FILE      write the ABySS dist.gv to FILE
+#       --gap=N           fixed gap size for ABySS dist.gv file [100]
+#       --tsv=FILE        write graph in TSV format to FILE
+#       --barcode-counts=FILE       write number of reads per barcode to FILE
+#   -m, --index_multiplicity=RANGE  barcode multiplicity range [50-10000]
+#   -d, --max_degree=N    max node degree in scaffold graph [0]
+#   -e, --end_length=N    contig head/tail length for masking alignments [30000]
+#   -r, --error_percent=N p-value for head/tail assignment and link orientation
+#                         (lower is more stringent) [0.05]
+#   -v, --run_verbose     verbose logging
 rule run_arcs_for_scaffolding:
     input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.3rd.fa", 
            "arcs/bam_file.txt"
     output: "arcs/EGYPTREF_original.gv",
             "arcs/EGYPTREF.dist.gv",
+            "arcs/EGYPTREF_barcodecounts.txt"
     params: out_base=lambda wildcards, output: output[0][:-12]
     shell: "software/arcs-1.0.5/bin/arcs " +\
             "--file={input[0]} " + \
-            "--fofName={input[1]} " + 
-            "--base_name={params.out_base} " #+ \
-#            "--run_verbose"
+            "--fofName={input[1]} " + \
+            "--base_name={params.out_base} " + \
+            "--barcode-counts={output[2]} " + \
+            "-v "
 
 # Run python script makeTSVfile.py to convert ARCS graph output to 
 # LINKS XXX.tigpair_checkpoint file format
@@ -478,6 +534,17 @@ rule convert_graph_for_links:
     shell: "python software/arcs-1.0.5/bin/makeTSVfile.py " + \
            "{input.graph} {output} {input.assembly}" 
 
+#-f  sequences to scaffold (Multi-FASTA format, required)
+#-s  file-of-filenames, full path to long sequence reads or MPET pairs [see below] (Multi-FASTA/fastq format, required)
+#-k  k-mer value (default -k 15, optional)
+#-t  step of sliding window when extracting k-mer pairs from long reads (default -t 2, optional)
+#	 Multiple steps are separated by comma. eg. -t 10,5
+#-l  minimum number of links (k-mer pairs) to compute scaffold (default -l 5, optional)
+#-a  maximum link ratio between two best contig pairs (default -a 0.3, optional)
+#	 *higher values lead to least accurate scaffolding*
+#-b  base name for your output files (optional)
+#-x  Turn off Bloom filter functionality (-x 1 = yes, default = no, optional)
+#-v  Runs in verbose mode (-v 1 = yes, default = no, optional)
 rule run_links_for_scaffolding:
     input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.3rd.fa", 
            "arcs/EGYPTREF.tigpair_checkpoint.tsv"
@@ -489,8 +556,8 @@ rule run_links_for_scaffolding:
                  "-s arcs/empty.fof " + \
                  "-k 20 " + \
                  "-b {params.out_base} " + \
-                 "-l 5 " + \
                  "-t 2  " + \
+                 "-l 5 " + \
                  "-a 0.9 " + \
                  "-x 1 "
 #           "module load links/v1.8.6; " + \

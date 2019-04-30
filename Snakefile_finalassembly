@@ -136,12 +136,12 @@ rule index_bam_for_polishing_pilon:
 
 # Alternative env location: 48ff3853
 rule polish_with_pilon:
-    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.2nd.fa",
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.lay.fa",
            "polish_pilon/sr.srt.bam",
            "polish_pilon/sr.srt.bam.bai"
     output: "polish_pilon/pilon.fasta",
             "polish_pilon/pilon.changes"
-    log: "pilon/pilon.log"
+    log: "polish_pilon/pilon.log"
     conda: "envs/polish_pilon.yaml"
     shell: "java -Xmx300G -jar " + \
                 ".snakemake/conda/59fd21e1/share/pilon-1.23-0/pilon-1.23.jar " + \

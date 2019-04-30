@@ -66,11 +66,15 @@ rule cp_calling_info:
     output: protected("variant_stats/wgs_calling_regions.hg38.interval_list")
     shell: "cp {input} {output}"
 
+# Include only sites with all Non-Reference (ALT) Allele Frequencies (af) or 
+# Counts (ac) within the range specified, and including the specified value. The
+#  default options require all alleles to meet the specified criteria, whereas 
+# the options appended with "any" require only one allele to meet the criteria. 
 rule num_variants:
     input: "{var_type}_stats/egyptians.vcf.gz"
     output: temp("{var_type}_stats/{individual}_num_variants.txt")
     shell: "vcftools --gzvcf {input} " + \
-           "         --non-ref-ac 1 " + \
+           "         --non-ref-ac-any 1 " + \
            "         --indv {wildcards.individual} " + \
            "         --stdout " + \
            "         --recode " + \
