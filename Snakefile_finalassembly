@@ -574,7 +574,11 @@ rule extract_gff_file:
 # -o quast_results/latest if you did not specify QUAST output dir with -o option
 #     you can rerun QUAST on the same directory with -o quast_results/latest; 
 #     Watch out: this will reuse previous results quast_results/results_datetime
-ASSEMBLIES = ["EGYPTREFWTDBG2V4","EGYPTREFWTDBG2V3","EGYPTREFWTDBG2V2","EGYPTREFWTDBG2","EGYPTREFV2","CEGYPTREFV2","AK1","YORUBA","EGYPTREF","CEGYPTREF"]
+# --min-alignment (or -i) <int>
+#     Minimum length of alignment (in bp). Alignments shorter than this value 
+#     will be filtered. Note that all alignments shorter than 65 bp will be 
+#     filtered regardless of this threshold. 
+ASSEMBLIES = ["EGYPTREFPILON","EGYPTREFWTDBG2V4","EGYPTREFWTDBG2V3","EGYPTREFWTDBG2V2","EGYPTREFWTDBG2","EGYPTREFV2","CEGYPTREFV2","AK1","YORUBA","EGYPTREF","CEGYPTREF"]
 rule run_quast:
     input: "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa",
            "annotations/Homo_sapiens.GRCh38.94.gff3",
@@ -588,7 +592,11 @@ rule run_quast:
            "-r {input[0]} " + \
            "-g gene:{input[1]} " + \
            "-t 48 " + \
+           "--min-alignment 65 " + \
+           "--min-identity 80.0 " + \
            "--large " + \
            "--memory-efficient " + \
            "--circos; " + \
            "touch {output} "
+
+# tried:            "--min-alignment 65 " + \

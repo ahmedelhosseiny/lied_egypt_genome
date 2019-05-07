@@ -1,0 +1,84 @@
+#kate:syntax python;
+
+# Grob habe ich nun alle Varianten (auch Indels) mit Phasing genommen, die
+# Erfolgreich auf hg19 geliftet wurden
+# In hg19 das gleiche Referenz-Allele wie in hg38 haben (das wechselt ganz 
+# selten)
+# Deren Genotypen für EGYPTREF mind. 1 Alt-Allel haben (wenn es 0/0 war, hab ich
+# es weggelassen, um das VCF File möglichst klein zu machen; ändert aber nichts
+# am Ergebnis)
+# Deren Genotypen für EGYPTREF gecalled wurden
+# Die „known“ sind, d.h. eine rsID besitzen
+# 
+# Die Ergebnisse sind nun in der Datei 
+# /data/lied_egypt_genome/output_wgs/phasing/sanger/joined.txt zusammengefasst.
+# 
+# Spalte: chr:pos:ref:alt in hg38 (mit „chr“ vor der Zahl UCSC-Schreibweise)
+# Spalte: chr:pos:ref:alt in hg19 (ohne „chr“ vor der Zahl Ensembl-Schreibweise)
+# Spalte: rsid aus der Variant-Calling-Datei
+# Spalte: Sample-Name
+# Unphased Genotypen
+# Phased Genotypen
+# 
+# Wahrscheinlich ist es am einfachsten, wenn du aus deinem gephasten VCF nun 
+# auch eine TSV-Datei erzeugst (mit „bcftools query“ geht das relativ einfach) 
+# und diese dann mit meiner Datei joinst.
+#  
+# Als Phasing-Programm habe ich EAGLE mit dem HRC-Panel verwendet.
+
+rule link_10x_phased_variants:
+    input: "longranger_phasing/EGYPTREF/outs/phased_variants.vcf.gz"
+    output: "phasing_comparison/EGYPTREF_10x_phased.vcf.gz"
+    shell: "ln -s ../{input} {output}"
+
+rule link_sanger_phased_variants:
+    input: "/data/lied_egypt_genome/output_wgs/phasing/sanger/joined.txt"
+    output: "phasing_comparison/EGYPTREF_sanger_phased.txt"
+    shell: "ln -s {input} {output}"
+
+rule txt_to_vcf:
+    input: "phasing_comparison/EGYPTREF_sanger_phased.txt"
+    output: "phasing_comparison/EGYPTREF_sanger_phased.vcf"
+    run:
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            f_out.write("##fileformat=VCFv4.2\n")
+            f_out.write("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tEGYPTREF\n")
+            for line in f_in:
+                # Skip header
+                if line[:20] == "hg38_chr_pos_ref_alt":
+                    continue
+                s = line.strip("\n").split(" ")
+                # Get hg38 chromosomes and coordinates
+                chrom,pos,ref,alt = s[0].split(":")
+                rsid = s[2]
+                unphased_gt = s[4]
+                phased_gt = s[5]
+                unphased_alleles = unphased_gt.split("/")
+                phased_alleles = phased_gt.split("|")
+                # Make sure phased alleles match unphased alleles
+                assert(((unphased_alleles[0]==phased_alleles[0]) and \
+                        (unphased_alleles[1]==phased_alleles[1])) or \
+                        ((unphased_alleles[0]==phased_alleles[1]) and \
+                        (unphased_alleles[1]==phased_alleles[0])))
+                f_out.write("\t".join([chrom,pos,rsid,ref,alt,'.','PASS','.', \
+                                       'GT',phased_gt])+"\n")
+
+rule compress_sanger_phased:
+    input: "phasing_comparison/EGYPTREF_sanger_phased.vcf"
+    output: "phasing_comparison/EGYPTREF_sanger_phased.vcf.gz"
+    shell: "cat {input} | gzip -c > {output}"
+
+rule compare_phasings:
+    input: "phasing_comparison/EGYPTREF_10x_phased.vcf.gz",
+           "phasing_comparison/EGYPTREF_sanger_phased.vcf.gz"
+    output: "phasing_comparison/EGYPTREF_{chrom}.diff.sites_in_file"
+    params: out_base=lambda wildcards, output: output[0][:-19]
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--gzdiff {input[1]} " + \
+                    "--out {params.out_base} " + \
+                    "--chr {wildcards.chrom} " + \
+                    "--diff-site "
+
+rule compare_phasings_all:
+    input: expand("phasing_comparison/EGYPTREF_{chrom}.diff.sites_in_file", \
+                   chrom=["chr"+str(x) for x in range(1,23)])
