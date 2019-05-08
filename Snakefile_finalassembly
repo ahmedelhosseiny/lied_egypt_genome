@@ -592,9 +592,12 @@ rule run_quast:
            "-r {input[0]} " + \
            "-g gene:{input[1]} " + \
            "-t 48 " + \
+           "--large " + \
+           "--k-mer-stats " + \
            "--min-alignment 65 " + \
            "--min-identity 80.0 " + \
-           "--large " + \
+           "--ambiguity-score 0.8 " + \
+           "--use-all-alignments " + \
            "--memory-efficient " + \
            "--circos; " + \
            "touch {output} "

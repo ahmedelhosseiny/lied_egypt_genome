@@ -26,10 +26,28 @@
 #  
 # Als Phasing-Programm habe ich EAGLE mit dem HRC-Panel verwendet.
 
+# Getting HRC reference panel information (Readme and sites)
+rule get_hrc_readme:
+    output: "phasing_comparison/HRC.r1-1/README"
+    shell: "wget -P phasing_comparison/HRC.r1-1/ ftp://ngs.sanger.ac.uk/production/hrc/HRC.r1-1/README"
+
+rule get_hrc_sites:
+    output: "phasing_comparison/HRC.r1-1/HRC.r1-1.GRCh37.wgs.mac5.sites.vcf.gz",
+            "phasing_comparison/HRC.r1-1/HRC.r1-1.GRCh37.wgs.mac5.sites.tab.gz"
+    shell: "wget -P phasing_comparison/HRC.r1-1/ ftp://ngs.sanger.ac.uk/production/hrc/HRC.r1-1/HRC.r1-1.GRCh37.wgs.mac5.sites.vcf.gz; " + \
+           "wget -P phasing_comparison/HRC.r1-1/ ftp://ngs.sanger.ac.uk/production/hrc/HRC.r1-1/HRC.r1-1.GRCh37.wgs.mac5.sites.tab.gz; "
+
 rule link_10x_phased_variants:
     input: "longranger_phasing/EGYPTREF/outs/phased_variants.vcf.gz"
-    output: "phasing_comparison/EGYPTREF_10x_phased.vcf.gz"
+    output: "phasing_comparison/EGYPTREF_10x_phased_orig.vcf.gz"
     shell: "ln -s ../{input} {output}"
+
+# Normalize the 10x-phased variants, i.e. split multiallelic sites into 
+# multiple rows
+rule normalize_multiallelic_sites:
+    input: "phasing_comparison/EGYPTREF_10x_phased_orig.vcf.gz"
+    output: "phasing_comparison/EGYPTREF_10x_phased.vcf.gz"
+    shell: "bcftools norm --multiallelics - -O z {input} > {output}" 
 
 rule link_sanger_phased_variants:
     input: "/data/lied_egypt_genome/output_wgs/phasing/sanger/joined.txt"
@@ -68,10 +86,13 @@ rule compress_sanger_phased:
     output: "phasing_comparison/EGYPTREF_sanger_phased.vcf.gz"
     shell: "cat {input} | gzip -c > {output}"
 
-rule compare_phasings:
+# --diff-site
+# Outputs the sites that are common / unique to each file. The output file has 
+# the suffix ".diff.sites_in_files".
+rule compare_phasings_sites_in_file:
     input: "phasing_comparison/EGYPTREF_10x_phased.vcf.gz",
            "phasing_comparison/EGYPTREF_sanger_phased.vcf.gz"
-    output: "phasing_comparison/EGYPTREF_{chrom}.diff.sites_in_file"
+    output: "phasing_comparison/EGYPTREF_{chrom}.diff.sites_in_files"
     params: out_base=lambda wildcards, output: output[0][:-19]
     shell: "vcftools --gzvcf {input[0]} " + \
                     "--gzdiff {input[1]} " + \
@@ -79,6 +100,45 @@ rule compare_phasings:
                     "--chr {wildcards.chrom} " + \
                     "--diff-site "
 
+# Deduce from diff.sites_in_file file the bi-alellic sites present in both 
+# imputations
+rule get_sites_for_discordance:
+    input: "phasing_comparison/EGYPTREF_{chrom}.diff.sites_in_files"
+    output: "phasing_comparison/EGYPTREF_{chrom}.sites_for_discordance"
+    shell: "cat {input} | grep -v ',' | grep -P '\tB\t' | cut -f 1,2 > {output}"
+
+# --diff-site-discordance
+# This option calculates discordance on a site by site basis. The resulting 
+# output file has the suffix ".diff.sites".
+rule compare_phasings_site:
+    input: "phasing_comparison/EGYPTREF_10x_phased.vcf.gz",
+           "phasing_comparison/EGYPTREF_sanger_phased.vcf.gz"
+    output: "phasing_comparison/EGYPTREF_{chrom}.diff.sites"
+    params: out_base=lambda wildcards, output: output[0][:-11]
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--gzdiff {input[1]} " + \
+                    "--out {params.out_base} " + \
+                    "--chr {wildcards.chrom} " + \
+                    "--diff-site-discordance "
+
+# --diff-discordance-matrix
+# This option calculates a discordance matrix. This option only works with 
+# bi-allelic loci with matching alleles that are present in both files. The 
+# resulting output file has the suffix ".diff.discordance.matrix".
+rule compare_phasings_discordance_matrix:
+    input: "phasing_comparison/EGYPTREF_10x_phased.vcf.gz",
+           "phasing_comparison/EGYPTREF_sanger_phased.vcf.gz",
+           "phasing_comparison/EGYPTREF_{chrom}.sites_for_discordance"
+    output: "phasing_comparison/EGYPTREF_{chrom}.diff.discordance_matrix"
+    params: out_base=lambda wildcards, output: output[0][:-24]
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--gzdiff {input[1]} " + \
+                    "--out {params.out_base} " + \
+                    "--positions {input[2]} " + \
+                    "--diff-discordance-matrix "
+
 rule compare_phasings_all:
-    input: expand("phasing_comparison/EGYPTREF_{chrom}.diff.sites_in_file", \
+    input: expand("phasing_comparison/EGYPTREF_{chrom}.{diff_type}", \
+                   diff_type=["diff.sites_in_files","diff.sites", \
+                               "diff.discordance_   matrix"], \
                    chrom=["chr"+str(x) for x in range(1,23)])
