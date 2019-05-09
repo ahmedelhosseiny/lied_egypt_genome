@@ -44,10 +44,31 @@ rule link_10x_phased_variants:
 
 # Normalize the 10x-phased variants, i.e. split multiallelic sites into 
 # multiple rows
-rule normalize_multiallelic_sites:
+#  -m, --multiallelics -|+[snps|indels|both|any]
+# split multiallelic sites into biallelic records (-) or join biallelic sites 
+# into multiallelic records (+). An optional type string can follow which 
+# controls variant types which should be split or merged together: If only SNP 
+# records should be split or merged, specify snps; if both SNPs and indels 
+# should be merged separately into two records, specify both; if SNPs and indels
+#  should be merged into a single record, specify any. 
+# This and the next bcftools command are the same that Matthias applied before 
+# uploading the variant data to the Sanger imputation server
+rule split_multiallelic_sites:
     input: "phasing_comparison/EGYPTREF_10x_phased_orig.vcf.gz"
     output: "phasing_comparison/EGYPTREF_10x_phased.vcf.gz"
-    shell: "bcftools norm --multiallelics - -O z {input} > {output}" 
+    shell: "bcftools norm -m-both -o {output} -Oz {input} "
+
+# Normalize the 10x-phased variants, i.e. split multiallelic sites into 
+# multiple rows
+# Left-align and normalize indels, check if REF alleles match the reference, 
+# split multiallelic sites into multiple rows; recover multiallelics from 
+# multiple rows. Left-alignment and normalization will only be applied if the 
+# --fasta-ref option is supplied.
+# Not needed???
+#rule normalize_vcf:
+#    input: "phasing_comparison/EGYPTREF_10x_phased_nomultiallelic.vcf.gz"
+#    output: "phasing_comparison/EGYPTREF_10x_phased.vcf.gz"
+#    shell: "bcftools norm -o {output} -Oz {input} "
 
 rule link_sanger_phased_variants:
     input: "/data/lied_egypt_genome/output_wgs/phasing/sanger/joined.txt"
@@ -137,8 +158,24 @@ rule compare_phasings_discordance_matrix:
                     "--positions {input[2]} " + \
                     "--diff-discordance-matrix "
 
+# Merge Sange_phasing to 10x phasing VCF file
+rule merge_vcf_files:
+    input: "phasing_comparison/EGYPTREF_10x_phased.vcf.gz",
+           "phasing_comparison/EGYPTREF_sanger_phased.vcf.gz",
+           "phasing_comparison/EGYPTREF_{chrom}.sites_for_discordance"
+    output: "phasing_comparison/EGYPTREF_{chrom}_merged_haplotypes.vcf.gz"
+    shell: "bcftools merge --force-samples " + \
+                          "--positions {input[2]} " + \
+                          "{input[0]} {input[1]} " + \
+                          "-o {output} " + \
+                          "-Oz " + \
+                          "{input[0]} {input[1]} "
+                          
+
 rule compare_phasings_all:
     input: expand("phasing_comparison/EGYPTREF_{chrom}.{diff_type}", \
                    diff_type=["diff.sites_in_files","diff.sites", \
-                               "diff.discordance_   matrix"], \
+                               "diff.discordance_matrix"], \
+                   chrom=["chr"+str(x) for x in range(1,23)]), \
+           expand("phasing_comparison/EGYPTREF_{chrom}_merged_haplotypes.vcf.gz", \
                    chrom=["chr"+str(x) for x in range(1,23)])
