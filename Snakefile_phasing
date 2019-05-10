@@ -1,4 +1,5 @@
 #kate:syntax python;
+import gzip
 
 # Grob habe ich nun alle Varianten (auch Indels) mit Phasing genommen, die
 # Erfolgreich auf hg19 geliftet wurden
@@ -56,7 +57,8 @@ rule link_10x_phased_variants:
 rule split_multiallelic_sites:
     input: "phasing_comparison/EGYPTREF_10x_phased_orig.vcf.gz"
     output: "phasing_comparison/EGYPTREF_10x_phased.vcf.gz"
-    shell: "bcftools norm -m-both -o {output} -Oz {input} "
+    shell: "bcftools norm -m-both -Ov {input} | bgzip -c > {output}; "+ \
+           "tabix {output}"
 
 # Normalize the 10x-phased variants, i.e. split multiallelic sites into 
 # multiple rows
@@ -105,7 +107,8 @@ rule txt_to_vcf:
 rule compress_sanger_phased:
     input: "phasing_comparison/EGYPTREF_sanger_phased.vcf"
     output: "phasing_comparison/EGYPTREF_sanger_phased.vcf.gz"
-    shell: "cat {input} | gzip -c > {output}"
+    shell: "cat {input} | vcf-sort | bgzip -c > {output}; "+ \
+           "tabix {output}"
 
 # --diff-site
 # Outputs the sites that are common / unique to each file. The output file has 
@@ -114,7 +117,7 @@ rule compare_phasings_sites_in_file:
     input: "phasing_comparison/EGYPTREF_10x_phased.vcf.gz",
            "phasing_comparison/EGYPTREF_sanger_phased.vcf.gz"
     output: "phasing_comparison/EGYPTREF_{chrom}.diff.sites_in_files"
-    params: out_base=lambda wildcards, output: output[0][:-19]
+    params: out_base=lambda wildcards, output: output[0][:-20]
     shell: "vcftools --gzvcf {input[0]} " + \
                     "--gzdiff {input[1]} " + \
                     "--out {params.out_base} " + \
@@ -158,24 +161,88 @@ rule compare_phasings_discordance_matrix:
                     "--positions {input[2]} " + \
                     "--diff-discordance-matrix "
 
-# Merge Sange_phasing to 10x phasing VCF file
-rule merge_vcf_files:
+# Get shared sites from 10x phasing
+rule vcf_10x_files_sites_both:
     input: "phasing_comparison/EGYPTREF_10x_phased.vcf.gz",
-           "phasing_comparison/EGYPTREF_sanger_phased.vcf.gz",
            "phasing_comparison/EGYPTREF_{chrom}.sites_for_discordance"
-    output: "phasing_comparison/EGYPTREF_{chrom}_merged_haplotypes.vcf.gz"
-    shell: "bcftools merge --force-samples " + \
-                          "--positions {input[2]} " + \
-                          "{input[0]} {input[1]} " + \
-                          "-o {output} " + \
-                          "-Oz " + \
-                          "{input[0]} {input[1]} "
-                          
+    output: "phasing_comparison/EGYPTREF_10x_phased_{chrom}.vcf.gz"
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--stdout " + \
+                    "--recode " + \
+                    "--recode-INFO-all " + \
+                    "--remove-indels " + \
+                    "--non-ref-ac-any 1 " + \
+                    "--positions {input[1]} | " + \
+                    "bgzip -c > {output}; "+ \
+           "tabix {output}"
+
+# Get shared sites from sanger phasing
+rule vcf_sanger_files_site_both:
+    input: "phasing_comparison/EGYPTREF_sanger_phased.vcf.gz",
+           "phasing_comparison/EGYPTREF_{chrom}.sites_for_discordance"
+    output: "phasing_comparison/EGYPTREF_sanger_phased_{chrom}.vcf.gz"
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--stdout " + \
+                    "--recode " + \
+                    "--recode-INFO-all " + \
+                    "--positions {input[1]} | "
+                    "bgzip -c > {output}; "+ \
+           "tabix {output}"
+
+# Merge Sanger_phasing to 10x phasing VCF file
+rule compare_phasings:
+    input: "phasing_comparison/EGYPTREF_10x_phased_{chrom}.vcf.gz",
+           "phasing_comparison/EGYPTREF_sanger_phased_{chrom}.vcf.gz"
+    output: "phasing_comparison/EGYPTREF_{chrom}_concordant.txt",
+            "phasing_comparison/EGYPTREF_{chrom}_discordant.txt",
+            "phasing_comparison/EGYPTREF_{chrom}_nonmatching.txt"
+    run: 
+        vars = {}
+        lines = {}
+        with gzip.open(input[0],"r") as f_10x:
+            for line in f_10x:
+                line = line.decode()
+                if line[0] == '#':
+                    continue
+                s = line.strip("\n").split("\t")
+                chrom = s[0]
+                pos = s[1]
+                ref = s[3]
+                alt = s[4]
+                gt = s[9].split(':')[0]
+                vars["\t".join([chrom,pos,ref,alt])] = gt
+                lines["\t".join([chrom,pos,ref,alt])] = line
+        with gzip.open(input[1],"r") as f_sanger, \
+             open(output[0],"w") as f_concordant, \
+             open(output[1],"w") as f_discordant:
+            for line in f_sanger:
+                line = line.decode()
+                if line[0] == '#':
+                    continue
+                s = line.strip("\n").split("\t")
+                chrom = s[0]
+                pos = s[1]
+                ref = s[3]
+                alt = s[4]
+                gt = s[9].split(':')[0]
+                gt_10x = vars["\t".join([chrom,pos,ref,alt])]
+                line_10x = lines["\t".join([chrom,pos,ref,alt])]
+                print(gt)
+                print(gt_10x)
+                if gt == gt_10x:
+                    f_concordant.write(line_10x)
+                else:
+                    f_discordant.write(line_10x.strip("\n")+"\t"+line)
+                del lines["\t".join([chrom,pos,ref,alt])]
+        with open(output[2],"w") as f_nonmatching:
+            for line in list(lines):
+                f_nonmatching.write(line)
+    
 
 rule compare_phasings_all:
     input: expand("phasing_comparison/EGYPTREF_{chrom}.{diff_type}", \
                    diff_type=["diff.sites_in_files","diff.sites", \
                                "diff.discordance_matrix"], \
                    chrom=["chr"+str(x) for x in range(1,23)]), \
-           expand("phasing_comparison/EGYPTREF_{chrom}_merged_haplotypes.vcf.gz", \
+           expand("phasing_comparison/EGYPTREF_{chrom}_concordant.txt", \
                    chrom=["chr"+str(x) for x in range(1,23)])
