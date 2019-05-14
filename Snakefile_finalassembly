@@ -89,6 +89,108 @@ rule assembl_with_wtdbg2:
                  " -x sq -g 3g -t 31 " + \
                  " -o {params.out_base} "
 
+# WTPOA-CNS: Consensuser for wtdbg using PO-MSA
+# Author: Jue Ruan <ruanjue@gmail.com>
+# Version: 2.3
+# Usage: wtpoa-cns [options]
+# Options:
+#  -t <int>    Number of threads, [4]
+#  -d <string> Reference sequences for SAM input, will invoke sorted-SAM input mode
+#  -u          Only process reference regions present in/between SAM alignments
+#  -r          Force to use reference mode
+#  -p <string> Similar with -d, but translate SAM into wtdbg layout file
+#  -i <string> Input file(s) *.ctg.lay from wtdbg, +, [STDIN]
+#              Or sorted SAM files when having -d
+#  -o <string> Output files, [STDOUT]
+#  -f          Force overwrite
+#  -j <int>    Expected max length of node, or say the overlap length of two adjacent units in layout file, [1500] bp
+#  -b <int>    Bonus for tri-bases match, [0]
+#  -M <int>    Match score, [2]
+#  -X <int>    Mismatch score, [-5]
+#  -I <int>    Insertion score, [-2]
+#  -D <int>    Deletion score, [-4]
+#  -H <float>  Homopolymer merge score used in dp-call-cns mode, [-3]
+#  -B <int>    Bandwidth, [96]
+#  -W <int>    Window size in the middle of the first read for fast align remaining reads, [200]
+#              If $W is negative, will disable fast align, but use the abs($W) as Band align score cutoff
+#  -w <int>    Min size of aligned size in window, [$W * 0.5]
+#              In sorted-SAM input mode, -w is the sliding window size [2000]
+#  -A          Abort TriPOA when any read cannot be fast aligned, then try POA
+#  -S <int>    Shuffle mode, 0: don't shuffle reads, 1: by shared kmers, 2: subsampling. [1]
+#  -R <int>    Realignment bandwidth, 0: disable, [16]
+#  -c <int>    Consensus mode: 0, run-length; 1, dp-call-cns, [0]
+#  -C <int>    Min count of bases to call a consensus base, [3]
+#  -F <float>  Min frequency of non-gap bases to call a consensus base, [0.5]
+#  -N <int>    Max number of reads in PO-MSA [20]
+#              Keep in mind that I am not going to generate high accurate consensus sequences here
+#  -x <string> Presets, []
+#              sam-sr: polishs contigs from short reads mapping, accepts sorted SAM files
+#                      shorted for '-w 200 -j 150 -R 0 -b 1 -c 1 -N 50 -rS 2'
+#  -v          Verbose
+#  -V          Print version information and then exit
+rule consensus_with_wtdbg2:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.lay.gz"
+    output: protected("assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.lay.fa")
+    conda: "envs/wtdbg.yaml"
+    shell: "wtpoa-cns -i {input} " + \
+                    " -t 31 " + \
+                    " -o {output}"
+
+rule polish_with_pb_reads:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.lay.fa",
+           "pacbio/pb_EGYPTREF.fa"
+    output: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.map.bam",
+            "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.map.srt.bam",
+            protected("assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.2nd.fa")
+    conda: "envs/polish_wtdbg.yaml"
+    shell: "minimap2 -t 31 -x map-pb -a {input[0]} {input[1]} | " + \
+           "samtools view -Sb - > {output[0]}; " + \
+           "samtools sort {output[0]} -o {output[1]}; " + \
+           "samtools view {output[1]} | " + \
+           "wtpoa-cns -t 31 -d {input[0]} -i - -fo {output[2]}; "
+
+# Mapping the Illumina PE data to the contigs
+# -a STR: Algorithm for constructing BWT index. Chosen option: 
+#         bwtsw: Algorithm implemented in BWT-SW. This method works with the 
+#         whole human genome.
+# -p STR: Prefix of the output database [same as db filename] 
+rule bwa_index_for_polishing_2nd:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.2nd.fa"
+    output: "assembly_wtdbg2/bwa/EGYPTREF_wtdbg2.ctg.2nd.amb",
+            "assembly_wtdbg2/bwa/EGYPTREF_wtdbg2.ctg.2nd.ann",
+            "assembly_wtdbg2/bwa/EGYPTREF_wtdbg2.ctg.2nd.bwt",
+            "assembly_wtdbg2/bwa/EGYPTREF_wtdbg2.ctg.2nd.pac",
+            "assembly_wtdbg2/bwa/EGYPTREF_wtdbg2.ctg.2nd.sa"
+    conda: "envs/bwa.yaml"
+    shell: "bwa index -a bwtsw " + \
+                     "-p assembly_wtdbg2/bwa/EGYPTREF_wtdbg2.ctg.2nd " + \
+                     "{input}"
+
+rule bwa_mem_for_polishing:
+    input: index = "assembly_wtdbg2/bwa/EGYPTREF_wtdbg2.ctg.2nd.sa",
+           fastq_r1 = "data/02.DES/{lib}_1.fq.gz",
+           fastq_r2 = "data/02.DES/{lib}_2.fq.gz"
+    output: "assembly_wtdbg2/bwa/{lib}.bam"
+    conda: "envs/bwa.yaml"
+    shell: "bwa mem -t 30 " + \
+           "assembly_wtdbg2/bwa/EGYPTREF_wtdbg2.ctg.2nd "+\
+           "{input.fastq_r1} {input.fastq_r2} " + \
+           " | samtools sort -@30 -o {output} -"
+
+rule merge_bam_for_polishing:
+    input: expand("assembly_wtdbg2/bwa/{lib}.bam", lib=ILLUMINA_LIBS)
+    output: "assembly_wtdbg2/bwa/sr.srt.bam"
+    conda: "envs/polish_wtdbg.yaml"
+    shell: "samtools merge {output} {input}"
+
+rule polish_with_short_reads:
+    input: "assembly_wtdbg2/bwa/sr.srt.bam",
+           "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.2nd.fa"
+    output: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.3rd.fa"
+    conda: "envs/polish_wtdbg.yaml"
+    shell: "samtools view {input[0]} | " + \
+           "wtpoa-cns -t 30 -x sam-sr -d {input[1]} -i - -fo {output}"
+
 
 ################################################################################
 #### Polishing using Pac Bio and subsequently Illumina PE data using pilon #####
@@ -99,55 +201,55 @@ rule assembl_with_wtdbg2:
 #         bwtsw: Algorithm implemented in BWT-SW. This method works with the 
 #         whole human genome.
 # -p STR: Prefix of the output database [same as db filename] 
-rule bwa_index_for_polishing_pilon:
-    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.lay.fa"
-    output: "polish_pilon/bwa/EGYPTREF_wtdbg2.ctg.amb",
-            "polish_pilon/bwa/EGYPTREF_wtdbg2.ctg.ann",
-            "polish_pilon/bwa/EGYPTREF_wtdbg2.ctg.bwt",
-            "polish_pilon/bwa/EGYPTREF_wtdbg2.ctg.pac",
-            "polish_pilon/bwa/EGYPTREF_wtdbg2.ctg.sa"
+rule v3_bwa_index_for_polishing_pilon:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.3rd.fa"
+    output: "polish_pilon_after_wtpoa/bwa/EGYPTREF_wtdbg2.ctg.3rd.amb",
+            "polish_pilon_after_wtpoa/bwa/EGYPTREF_wtdbg2.ctg.3rd.ann",
+            "polish_pilon_after_wtpoa/bwa/EGYPTREF_wtdbg2.ctg.3rd.bwt",
+            "polish_pilon_after_wtpoa/bwa/EGYPTREF_wtdbg2.ctg.3rd.pac",
+            "polish_pilon_after_wtpoa/bwa/EGYPTREF_wtdbg2.ctg.3rd.sa"
     conda: "envs/polish_pilon.yaml"
     shell: "bwa index -a bwtsw " + \
-                     "-p polish_pilon/bwa/EGYPTREF_wtdbg2.ctg " + \
+                     "-p polish_pilon_after_wtpoa/bwa/EGYPTREF_wtdbg2.ctg.3rd " + \
                      "{input}"
 
-rule bwa_mem_for_polishing_pilon:
-    input: index = "polish_pilon/bwa/EGYPTREF_wtdbg2.ctg.sa",
+rule v3_bwa_mem_for_polishing_pilon:
+    input: index = "polish_pilon_after_wtpoa/bwa/EGYPTREF_wtdbg2.ctg.3rd.sa",
            fastq_r1 = "data/02.DES/{lib}_1.fq.gz",
            fastq_r2 = "data/02.DES/{lib}_2.fq.gz"
-    output: "polish_pilon/bwa/{lib}.bam"
+    output: "polish_pilon_after_wtpoa/bwa/{lib}.bam"
     conda: "envs/polish_pilon.yaml"
     shell: "bwa mem -t 32 " + \
-           "polish_pilon/bwa/EGYPTREF_wtdbg2.ctg "+\
+           "polish_pilon_after_wtpoa/bwa/EGYPTREF_wtdbg2.ctg.3rd "+\
            "{input.fastq_r1} {input.fastq_r2} " + \
            " | samtools sort -@30 -o {output} - "
 
-rule merge_bam_for_polishing_pilon:
-    input: expand("polish_pilon/bwa/{lib}.bam", lib=ILLUMINA_LIBS)
-    output: "polish_pilon/sr.srt.bam"
+rule v3_merge_bam_for_polishing_pilon:
+    input: expand("polish_pilon_after_wtpoa/bwa/{lib}.bam", lib=ILLUMINA_LIBS)
+    output: "polish_pilon_after_wtpoa/sr.srt.bam"
     conda: "envs/polish_pilon.yaml"
     shell: "samtools merge {output} {input}"
 
-rule index_bam_for_polishing_pilon:
-    input: "polish_pilon/sr.srt.bam"
-    output: "polish_pilon/sr.srt.bam.bai"
+rule v3_index_bam_for_polishing_pilon:
+    input: "polish_pilon_after_wtpoa/sr.srt.bam"
+    output: "polish_pilon_after_wtpoa/sr.srt.bam.bai"
     conda: "envs/polish_pilon.yaml"
     shell: "samtools index {input}"
 
 # Alternative env location: 48ff3853
-rule polish_with_pilon:
-    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.lay.fa",
-           "polish_pilon/sr.srt.bam",
-           "polish_pilon/sr.srt.bam.bai"
-    output: "polish_pilon/pilon.fasta",
-            "polish_pilon/pilon.changes"
-    log: "polish_pilon/pilon.log"
+rule v3_polish_with_pilon:
+    input: "assembly_wtdbg2/EGYPTREF_wtdbg2.ctg.3rd.fa",
+           "polish_pilon_after_wtpoa/sr.srt.bam",
+           "polish_pilon_after_wtpoa/sr.srt.bam.bai"
+    output: "polish_pilon_after_wtpoa/pilon.fasta",
+            "polish_pilon_after_wtpoa/pilon.changes"
+    log: "polish_pilon_after_wtpoa/pilon.log"
     conda: "envs/polish_pilon.yaml"
     shell: "java -Xmx300G -jar " + \
                 ".snakemake/conda/59fd21e1/share/pilon-1.23-0/pilon-1.23.jar " + \
                 "--genome {input[0]} " + \
                 "--bam {input[1]} " + \
-                "--outdir polish_pilon/ " + \
+                "--outdir polish_pilon_after_wtpoa/ " + \
                 "--changes " + \
                 "--diploid " + \
                 "--threads 32 " + \
