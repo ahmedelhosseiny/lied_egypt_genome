@@ -2210,7 +2210,7 @@ rule ng_plot_uncovered_bases_distribution:
 
 # These are the genes of interest (ABCC7=CFTR, HD=HDDC3?, Factor V=F5)
 GENES = ["CFTR","HDDC3","DMD","BRCA1","BRCA2","TP53","EGFR","APP","PSEN1","F5", \
-         "CARD11","LAMA4","MRC1","USH2A"]
+         "CARD11","LAMA4","MRC1","USH2A","GUCY1A1"]
 
 # Therefore, obtain a recent Ensembl annotation file first
 rule get_ensembl_gene_annotation_gtf:
@@ -2245,7 +2245,8 @@ WINDOW = {
     "CARD11": [100000,100000],
     "LAMA4": [100000,100000],
     "MRC1": [100000,100000],
-    "USH2A": [100000,100000]
+    "USH2A": [100000,100000],
+    "GUCY1A1": [100000,100000]
 }
 rule gc_get_start_end_position:
     input: "gene_centric/{gene}/{gene}.gtf"
@@ -2263,6 +2264,25 @@ rule gc_get_start_end_position:
                     end = str(int(s[4]) + WINDOW[wildcards.gene][1])
                     strand = s[6]
                     f_out.write("\t".join([chr,start,end,'.','.',strand])+"\n")
+
+# This is a version of the bed file with trailing "chr", because this is needed 
+# for the SNP calling file of Matthias
+rule gc_get_start_end_position_with_chr:
+    input: "gene_centric/{gene}/{gene}.gtf"
+    output: "gene_centric/{gene}/{gene}_with_chr.bed"
+    run:
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            f_out.write("# Custom bed file for region around gene\n")
+            for line in f_in:
+                if line[0] == "#":
+                    continue
+                s = line.split("\t")
+                if s[2] == "gene":
+                    chr = s[0]
+                    start = str(int(s[3]) - WINDOW[wildcards.gene][0])
+                    end = str(int(s[4]) + WINDOW[wildcards.gene][1])
+                    strand = s[6]
+                    f_out.write("\t".join(["chr"+chr,start,end,'.','.',strand])+"\n")
 
 rule gc_get_overlapping_genes:
     input: "annotations/Homo_sapiens.GRCh38.94.gtf",
@@ -2321,10 +2341,16 @@ rule gc_get_mapped_egyptref_reads_all:
 #                   sample=EGYPT_SAMPLES, \
 #                   gene=GENES)
 
+# Symlinking the VCF file with Egyptian SNP calling
+rule gc_symlink_var_file:
+    input: "/data/lied_egypt_genome/output_wgs/vars.clean.vcf.gz"
+    output: "gene_centric/egyptians.vcf.gz"
+    shell: "ln -s {input} {output}"
+
 # Get the SNP calls of the Egyptians for the specified genes
 rule gc_get_variants:
-    input: vcf="variants_GRCh38/egyptians.vcf.gz",
-           bed="gene_centric/{gene}/{gene}.bed"
+    input: vcf="gene_centric/egyptians.vcf.gz",
+           bed="gene_centric/{gene}/{gene}_with_chr.bed"
     output: "gene_centric/{gene}/{gene}_egyptians.vcf.gz"
     shell: "vcftools --gzvcf {input.vcf} " + \
                     "--bed {input.bed} " + \
