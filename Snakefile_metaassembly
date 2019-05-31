@@ -1,0 +1,210 @@
+# This workflow uses Novogene's EGYPTREFV2 assembly and our WTDBG2-based 
+# assembly to construct a meta-assembly
+
+from Bio import SeqIO
+from Bio.SeqRecord import SeqRecord
+
+ASSEMBLIES = ["EGYPTREFV2","EGYPTREFWTDBG2V3PILON"]
+
+# At first, we cut out from the EGYPTREFV2 assembly the sequence region that is 
+# not part of the wtdbg2-based assembly
+# This gets the alignment coordinates sorted by chromosome and then start 
+# position
+rule get_aligned_reference_coordinates:
+    input: "quast_results/latest/contigs_reports/all_alignments_Homo_sapiens-{assembly}-dna-primary_assembly.tsv"
+    output: "meta_assembly/{assembly}_aligned_coordinates.txt"
+    shell: "cat {input} | grep True | " + \
+           "awk '{{print $5 \"\t\" $1 \"\t\" $2 \"\t\" $6 \"\t\" $3 \"\t\" $4}}' | " + \
+           "sort -k 1,1h -k 2,2n > {output}"
+
+rule uncovered_reference_greater_10MB:
+    input: "meta_assembly/{assembly}_aligned_coordinates.txt"
+    output: "meta_assembly/{assembly}_uncovered_reference_in_between.txt",
+            "meta_assembly/{assembly}_gaps.txt"
+    run:
+        prev_chrom = "GL000008.2"
+        prev_start = 0
+        prev_end = 0
+        prev_line = ""
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out, \
+             open(output[1],"w") as f_gap:
+            f_gap.write("chrom\tstart\tend\tgapsize\n") 
+            for line in f_in:
+                s = line.split("\t")
+                chrom = s[0]
+                start = s[1]
+                end = s[2]
+                contig = s[3]
+                assert(int(start)<int(end))
+                if chrom == prev_chrom:
+                    # Note that if multiple contigs align to the same reference 
+                    # region, this may be negative
+                    if int(start)-int(prev_end)>1000000:
+                        f_out.write(prev_line)
+                        f_out.write(line)
+                        f_gap.write("\t".join([chrom,prev_end,start,str(int(start)-int(prev_end))])+"\n")
+                prev_chrom = chrom
+                prev_start = start
+                prev_end = end
+                prev_contig = contig
+                prev_line = line
+
+
+# Select EGYPTREF assembly alignments covering or within the min 1MB regions 
+# not covered; thereby do not select alignments which are entirely contained
+# within centromere regions
+# I obtained centromere positions from here: 
+# http://genome.ucsc.edu/cgi-bin/hgTables?hgsid=727922323_Dy46eSarKzMaYCPcTPenS8wKKcIQ&clade=mammal&org=Human&db=hg38&hgta_group=allTables&hgta_track=hg38&hgta_table=centromeres&hgta_regionType=genome&position=chr1%3A11%2C102%2C837-11%2C267%2C747&hgta_outputType=primaryTable&hgta_outFileName=
+# by selecting 'group: all tables' and 'table: centromeres'
+rule check_which_egyptrefv2_covers_wtdbg:
+    input: "meta_assembly/EGYPTREFWTDBG2V3PILON_gaps.txt",
+           "meta_assembly/EGYPTREFV2_aligned_coordinates.txt",
+           "data/misc/centromere_positions.txt"
+    output: "meta_assembly/EGYPTREFV2_covering_EGYPTREFWTDB2V3PILON_gaps.txt"
+    run:
+        # Read in centromere regions
+        centromeres = []
+        with open(input[2],"r") as f_in:
+            for line in f_in:
+                if line[0] == "#":
+                    continue
+                s = line.split("\t")
+                chrom,start,end = s[1:4]
+                # Remember to remove "chr" from chromosome
+                centromeres.append([chrom[3:],int(start),int(end)])
+        # Read in aligned EGYPTREF coordinates
+        aligned = []
+        with open(input[1],"r") as f_in:
+            for line in f_in:
+                s = line.split("\t")
+                chrom,start,end = s[:3]
+                aligned.append([chrom,int(start),int(end),line])
+        # Go over gap regions
+        header = ["gap_chrom","grch38_gap_start","grch38_gap_end","gap_size"] + \
+                 ["v2_grch38_al_chrom","v2_grch38_al_start","v2_grch38_al_end"] + \
+                 ["v2_al_contig","v2_al_start","v2_al_end","v2_al_len"]
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            f_out.write("\t".join(header)+"\n")
+            for line in f_in:
+                # Skip header
+                if line[:5] == "chrom":
+                    continue
+                s = line.split("\t")
+                chrom = s[0]
+                start = int(s[1])
+                end = int(s[2])
+                # Check if this gap is entirely within a centromere region
+                # then ignore it
+                for centromere in centromeres:
+                    centro_chrom = centromere[0]
+                    centro_start = centromere[1]
+                    centro_end = centromere[2]
+                    if chrom == centro_chrom and centro_start<=start \
+                       and end<=centro_end:
+                       continue
+                for alignment in aligned:
+                    align_chrom = alignment[0]
+                    align_start = alignment[1]
+                    align_end = alignment[2]
+                    align_line = alignment[3]
+                    if chrom == align_chrom and \
+                       ((align_start<=start and align_end>=end) or \
+                       (align_start<=end and align_end>=end) or \
+                       (align_start<=start and align_end>=start) or \
+                       (align_start<=start and align_end>=end)):
+                        align_len = str(align_end-align_start)
+                        f_out.write(line.strip("\n")+"\t"+ \
+                                    align_line.strip("\n")+"\t"+align_len+"\n")
+
+rule make_fasta_with_egyptrefv2_added_seq:
+    input: "meta_assembly/EGYPTREFV2_covering_EGYPTREFWTDB2V3PILON_gaps.txt",
+           "seq_EGYPTREFV2/Homo_sapiens.EGYPTREFV2.dna.primary_assembly.fa"
+    output: "meta_assembly/EGYPTREFV2_addto_EGYPTREFWTDB2V3PILON.fa"
+    run:
+        # Read in the Sequences to be extracted from EGYPTREFV2
+        egyptrefv2_seq_coords = {}
+        with open(input[0],"r") as f_in:
+            for line in f_in:
+                # Skip header
+                if line[:9] == "gap_chrom":
+                    continue
+                contig,start,end = line.split("\t")[7:10]
+                if contig in egyptrefv2_seq_coords:
+                    egyptrefv2_seq_coords[contig].append([int(start),int(end)])
+                else:
+                    egyptrefv2_seq_coords[contig] = [[int(start),int(end)]]
+        with open(input[1],"r") as f_in, open(output[0],"w") as f_out:
+            for record in SeqIO.parse(f_in,"fasta"):            
+                # Check if this contig is used to add onto
+                if record.id in egyptrefv2_seq_coords:
+                    get_seqs = egyptrefv2_seq_coords[record.id]
+                    for seq_pos in get_seqs:
+                        start = seq_pos[0]
+                        end = seq_pos[1]
+                        seq_name = record.id+"_"+str(start)+"_"+str(end)
+                        new_record = SeqRecord(record.seq[min(start,end):max(start,end)],seq_name, '', '')
+                        SeqIO.write(new_record, f_out, "fasta")
+
+
+# Here, we extract a list of partially covered genes in the base wtdbg2 assembly
+# For this: get the genes covered in EGYPTREFV2 if they are complete there
+# and add a gene to the list only if it is in the base assembly split in minimum 
+# three parts and thus likely missing something in between (still we
+# don't know this and may make a mistake)
+rule get_partial_genes_wtdbg2_in_egyptrefv2:
+    input: "quast_results/latest/genome_stats/Homo_sapiens-EGYPTREFWTDBG2V3PILON-dna-primary_assembly_genomic_features_gene.txt",
+           "quast_results/latest/genome_stats/Homo_sapiens-EGYPTREFV2-dna-primary_assembly_genomic_features_gene.txt"
+    output: "meta_assembly/partial_genes_addon.txt"
+    run:
+        # Read in the completely covered EGYPTREFV2 genes
+        complete_genes = {}
+        with open(input[1],"r") as f_in:
+            for line in f_in:
+                # Skip header
+                if line[:2] in ["ID","=="]:
+                    continue
+                s = line.strip("\n").split("\t")
+                if not s[4] == "complete":
+                    continue
+                complete_genes[s[0]] = s
+        # Go over the base assembly genes
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            header = ["gene","v2_contig","v2_start","v2_end","wtdbg2_contig",\
+                      "v2_start","v2_end"]
+            f_out.write("\t".join(header)+"\n")
+            for line in f_in:
+                # Skip header
+                if line[:2] in ["ID","=="]:
+                    continue
+                s = line.strip("\n").split("\t")
+                gene = s[0]
+                # Complete genes are fine and kept
+                if s[4] == "complete":
+                    continue
+                # Genes that are not complete in EGYPTREFV2 are also skipped
+                if not gene in complete_genes:
+                    continue
+                # Check if this partial gene is likely "missing something in
+                # the center", if not, skip it; this is the case if at least 
+                # two regions are aligned
+                if not "," in s[5]:
+                    continue
+                aligned_regions = s[5].split(",")
+                start_contig,start_region = aligned_regions[0].split(":")
+                end_contig,end_region = aligned_regions[-1].split(":")
+                # If start and end contig are not the same, we also don't
+                # want to replace this gene
+                if not start_contig == end_contig:
+                    print("Start and end not on same contig!")
+                    continue
+                start = start_region.split("-")[0]
+                end = end_region.split("-")[1]
+                v2_contig,region = complete_genes[gene][-1].split(":")
+                v2_start,v2_end = region.split("-")
+                info = [gene,start_contig,start,end,v2_contig,v2_start,v2_end]
+                f_out.write("\t".join(info)+"\n")
+                
+
+
+                
+
