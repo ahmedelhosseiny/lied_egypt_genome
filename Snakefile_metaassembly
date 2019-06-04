@@ -1,6 +1,7 @@
 # This workflow uses Novogene's EGYPTREFV2 assembly and our WTDBG2-based 
 # assembly to construct a meta-assembly
 
+from Bio.Seq import Seq
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
 
@@ -205,6 +206,92 @@ rule get_partial_genes_wtdbg2_in_egyptrefv2:
                 f_out.write("\t".join(info)+"\n")
                 
 
+# Here, we cut the sequences of the corresponding genes from EGYPTREFV2 and 
+# insert them into the WTDBG2-based assembly
+rule replace_partial_genes:
+    input: "seq_EGYPTREFV2/Homo_sapiens.EGYPTREFV2.dna.primary_assembly.fa",
+           "seq_EGYPTREFWTDBG2V3PILON/Homo_sapiens.EGYPTREFWTDBG2V3PILON.dna.primary_assembly.fa",
+           "meta_assembly/partial_genes_addon.txt"
+    output: "meta_assembly/Homo_sapiens.EGYPTREFMETAGENES.dna.primary_assembly.fa"
+    run: 
+        
+                # Get the v2 scaffold sequences
+        egyptrefv2 = {}
+        with open(input[0],"r") as f_v2:
+            for record in SeqIO.parse(f_v2,"fasta"):
+                egyptrefv2[record.id] = record.seq
+        # Get the sequences of genes to be replaced
+        egyptrefwtdbg2_coord = {}
+        egyptrefv2_geneseq = {}
+        # Get the V2 assembly sequences; save them to a hash table with the
+        # target contig, start and end being the key
+        with open(input[2],"r") as f_genes:
+            for line in f_genes:
+                # Skip header      
+                if line[:5] == "gene\t":
+                    continue
+                s = line.strip("\n").split("\t") 
+                wtdbg2_contig,wtdbg2_start,wtdbg2_end = s[1:4]
+                v2_scaffold,v2_start,v2_end = s[4:]
+                v2_seq = egyptrefv2[v2_scaffold]
+                v2_key = "\t".join([wtdbg2_contig,wtdbg2_start,wtdbg2_end])
+                # Watch out: if the start and end position ordering 
+                # doesn't match between v2 and wtdbg2, then the v2 
+                # seq needs to be reverse complemented
+                if not (int(wtdbg2_start)<int(wtdbg2_end) and \
+                        int(v2_start)<int(v2_end)) and not \
+                       (int(wtdbg2_start)>int(wtdbg2_end) and \
+                        int(v2_start)>int(v2_end)):
+                    egyptrefv2_geneseq[v2_key] = str(v2_seq[int(v2_start):int(v2_end)].reverse_complement())
+                else:
+                    egyptrefv2_geneseq[v2_key] = v2_seq[int(v2_start):int(v2_end)]
+                # Save the WTDBG2 assembly coordinates; save them to a table which is
+                # sorted according to increasing coordinates
+                if not wtdbg2_contig in egyptrefwtdbg2_coord:
+                    egyptrefwtdbg2_coord[wtdbg2_contig] = [[int(wtdbg2_start),int(wtdbg2_end)]]
+                else:
+                    egyptrefwtdbg2_coord[wtdbg2_contig].append([int(wtdbg2_start),int(wtdbg2_end)])
+        print(egyptrefwtdbg2_coord.keys())
+        # Get the base contig sequences
+        egyptrefwtdbg2 = {}
+        with open(input[1],"r") as f_wtdbg2:
+            for record in SeqIO.parse(f_wtdbg2,"fasta"):
+                egyptrefwtdbg2[record.id] = record.seq
+        # Go over base contig sequences and sort changes py start coordinates
+        with open(output[0],"w") as f_out:
+            for contig in egyptrefwtdbg2:
+                # If no changes needed, write contig out as it is
+                if not contig in egyptrefwtdbg2_coord:
+                    new_record = SeqRecord(egyptrefwtdbg2[contig],contig, '', '')
+                    SeqIO.write(new_record, f_out, "fasta")
+                    #print("Wrote "+contig+" Len: "+str(len(egyptrefwtdbg2[contig])))
+                    continue
+                #print(egyptrefwtdbg2_coord[contig])
+                egyptrefwtdbg2_coord[contig].sort(key=lambda x: x[0])
+                last_coord = 0
+                new_seq = ""
+                for coord in egyptrefwtdbg2_coord[contig]:
+                    # Make sure genes to be replaced are non-overlapping
+                    first_coord = int(coord[0])
+                    # Skip overlapping genes
+                    if last_coord>first_coord:
+                        print("Overlappling genes!")
+                        continue
+                    # Add base seq between v2 gene seqs to be added
+                    new_seq += egyptrefwtdbg2[contig][last_coord:first_coord]
+                    # Add gene seq to be added
+                    new_seq += egyptrefv2_geneseq["\t".join([contig,str(coord[0]),str(coord[1])])]
+                    last_coord = int(coord[1])
+                # Add sequence from last replaced gene to end
+                new_seq += egyptrefwtdbg2[contig][last_coord:]
+                print("Wrote "+contig+" Len: "+str(len(egyptrefwtdbg2[contig]))+" New Len: "+str(len(new_seq)))
+                # Mak a record and write this contig to file
+                new_record = SeqRecord(new_seq,contig, '', '')
+                SeqIO.write(new_record, f_out, "fasta") 
 
-                
+rule combine_with_added_seq:
+    input: "meta_assembly/Homo_sapiens.EGYPTREFMETAGENES.dna.primary_assembly.fa",
+           "meta_assembly/EGYPTREFV2_addto_EGYPTREFWTDB2V3PILON.fa"
+    output: "meta_assembly/Homo_sapiens.EGYPTREFMETA.dna.primary_assembly.fa"
+    shell: "cat {input} > {output}"
 
