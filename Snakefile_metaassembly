@@ -18,7 +18,7 @@ rule get_aligned_reference_coordinates:
            "awk '{{print $5 \"\t\" $1 \"\t\" $2 \"\t\" $6 \"\t\" $3 \"\t\" $4}}' | " + \
            "sort -k 1,1h -k 2,2n > {output}"
 
-rule uncovered_reference_greater_10MB:
+rule uncovered_reference_greater_800kb:
     input: "meta_assembly/{assembly}_aligned_coordinates.txt"
     output: "meta_assembly/{assembly}_uncovered_reference_in_between.txt",
             "meta_assembly/{assembly}_gaps.txt"
@@ -40,7 +40,7 @@ rule uncovered_reference_greater_10MB:
                 if chrom == prev_chrom:
                     # Note that if multiple contigs align to the same reference 
                     # region, this may be negative
-                    if int(start)-int(prev_end)>1000000:
+                    if int(start)-int(prev_end)>800000:
                         f_out.write(prev_line)
                         f_out.write(line)
                         f_gap.write("\t".join([chrom,prev_end,start,str(int(start)-int(prev_end))])+"\n")
@@ -108,11 +108,17 @@ rule check_which_egyptrefv2_covers_wtdbg:
                     align_start = alignment[1]
                     align_end = alignment[2]
                     align_line = alignment[3]
+                    # If an alignment crosses gap boundaries or is within a gap:
+                    # The cases are:
+                    # 1) entirely covering the gap
+                    # 2) crossing right gap border
+                    # 3) crossing left gap border
+                    # 4) being entirely contained in the gap
                     if chrom == align_chrom and \
                        ((align_start<=start and align_end>=end) or \
                        (align_start<=end and align_end>=end) or \
                        (align_start<=start and align_end>=start) or \
-                       (align_start<=start and align_end>=end)):
+                       (align_start>=start and align_end<=end)):
                         align_len = str(align_end-align_start)
                         f_out.write(line.strip("\n")+"\t"+ \
                                     align_line.strip("\n")+"\t"+align_len+"\n")
@@ -134,6 +140,7 @@ rule make_fasta_with_egyptrefv2_added_seq:
                     egyptrefv2_seq_coords[contig].append([int(start),int(end)])
                 else:
                     egyptrefv2_seq_coords[contig] = [[int(start),int(end)]]
+        added_seqs = {}
         with open(input[1],"r") as f_in, open(output[0],"w") as f_out:
             for record in SeqIO.parse(f_in,"fasta"):            
                 # Check if this contig is used to add onto
@@ -143,6 +150,13 @@ rule make_fasta_with_egyptrefv2_added_seq:
                         start = seq_pos[0]
                         end = seq_pos[1]
                         seq_name = record.id+"_"+str(start)+"_"+str(end)
+                        # Some seqs would be added multiple times because they
+                        # cover more than one gap, thus check for this and don't
+                        # add if this is the case
+                        if seq_name in added_seqs:
+                            continue
+                        added_seqs[seq_name] = True
+                        # If the sequence is less than 
                         new_record = SeqRecord(record.seq[min(start,end):max(start,end)],seq_name, '', '')
                         SeqIO.write(new_record, f_out, "fasta")
 
@@ -212,10 +226,10 @@ rule replace_partial_genes:
     input: "seq_EGYPTREFV2/Homo_sapiens.EGYPTREFV2.dna.primary_assembly.fa",
            "seq_EGYPTREFWTDBG2V3PILON/Homo_sapiens.EGYPTREFWTDBG2V3PILON.dna.primary_assembly.fa",
            "meta_assembly/partial_genes_addon.txt"
-    output: "meta_assembly/Homo_sapiens.EGYPTREFMETAGENES.dna.primary_assembly.fa"
+    output: "meta_assembly/Homo_sapiens.EGYPTREFMETAGENES.dna.primary_assembly.fa",
+            "meta_assembly/replaced_gene_seqs.txt"
     run: 
-        
-                # Get the v2 scaffold sequences
+        # Get the v2 scaffold sequences
         egyptrefv2 = {}
         with open(input[0],"r") as f_v2:
             for record in SeqIO.parse(f_v2,"fasta"):
@@ -234,23 +248,27 @@ rule replace_partial_genes:
                 wtdbg2_contig,wtdbg2_start,wtdbg2_end = s[1:4]
                 v2_scaffold,v2_start,v2_end = s[4:]
                 v2_seq = egyptrefv2[v2_scaffold]
-                v2_key = "\t".join([wtdbg2_contig,wtdbg2_start,wtdbg2_end])
+                left_pos_wtdbg2 = min(int(wtdbg2_start),int(wtdbg2_end))
+                right_pos_wtdbg2 = max(int(wtdbg2_start),int(wtdbg2_end))
+                v2_key = "\t".join([wtdbg2_contig,str(left_pos_wtdbg2),str(right_pos_wtdbg2)])
+                left_pos_v2 = min(int(v2_start),int(v2_end))
+                right_pos_v2 = max(int(v2_start),int(v2_end))
                 # Watch out: if the start and end position ordering 
                 # doesn't match between v2 and wtdbg2, then the v2 
                 # seq needs to be reverse complemented
-                if not (int(wtdbg2_start)<int(wtdbg2_end) and \
-                        int(v2_start)<int(v2_end)) and not \
-                       (int(wtdbg2_start)>int(wtdbg2_end) and \
-                        int(v2_start)>int(v2_end)):
-                    egyptrefv2_geneseq[v2_key] = str(v2_seq[int(v2_start):int(v2_end)].reverse_complement())
+                if (int(wtdbg2_start)<int(wtdbg2_end) and \
+                    int(v2_start)>int(v2_end)) or \
+                   (int(wtdbg2_start)>int(wtdbg2_end) and \
+                    int(v2_start)<int(v2_end)):
+                    egyptrefv2_geneseq[v2_key] = str(v2_seq[left_pos_v2:right_pos_v2].reverse_complement())
                 else:
-                    egyptrefv2_geneseq[v2_key] = v2_seq[int(v2_start):int(v2_end)]
+                    egyptrefv2_geneseq[v2_key] = v2_seq[left_pos_v2:right_pos_v2]
                 # Save the WTDBG2 assembly coordinates; save them to a table which is
                 # sorted according to increasing coordinates
                 if not wtdbg2_contig in egyptrefwtdbg2_coord:
-                    egyptrefwtdbg2_coord[wtdbg2_contig] = [[int(wtdbg2_start),int(wtdbg2_end)]]
+                    egyptrefwtdbg2_coord[wtdbg2_contig] = [[left_pos_wtdbg2,right_pos_wtdbg2]]
                 else:
-                    egyptrefwtdbg2_coord[wtdbg2_contig].append([int(wtdbg2_start),int(wtdbg2_end)])
+                    egyptrefwtdbg2_coord[wtdbg2_contig].append([left_pos_wtdbg2,right_pos_wtdbg2])
         print(egyptrefwtdbg2_coord.keys())
         # Get the base contig sequences
         egyptrefwtdbg2 = {}
@@ -258,7 +276,7 @@ rule replace_partial_genes:
             for record in SeqIO.parse(f_wtdbg2,"fasta"):
                 egyptrefwtdbg2[record.id] = record.seq
         # Go over base contig sequences and sort changes py start coordinates
-        with open(output[0],"w") as f_out:
+        with open(output[0],"w") as f_out, open(output[1],"w") as f_replaced:
             for contig in egyptrefwtdbg2:
                 # If no changes needed, write contig out as it is
                 if not contig in egyptrefwtdbg2_coord:
@@ -280,6 +298,11 @@ rule replace_partial_genes:
                     # Add base seq between v2 gene seqs to be added
                     new_seq += egyptrefwtdbg2[contig][last_coord:first_coord]
                     # Add gene seq to be added
+                    # Check if the start and end sequences match
+                    f_replaced.write("Add: "+str(egyptrefv2_geneseq["\t".join([contig,str(coord[0]),str(coord[1])])])[:20]+"\n")
+                    f_replaced.write("Rem: "+str(egyptrefwtdbg2[contig][coord[0]:coord[1]])[:20]+"\n")
+                    f_replaced.write("RAd: "+str(egyptrefv2_geneseq["\t".join([contig,str(coord[0]),str(coord[1])])])[-20:]+"\n")
+                    f_replaced.write("RRe: "+str(egyptrefwtdbg2[contig][coord[0]:coord[1]])[-20:]+"\n")
                     new_seq += egyptrefv2_geneseq["\t".join([contig,str(coord[0]),str(coord[1])])]
                     last_coord = int(coord[1])
                 # Add sequence from last replaced gene to end
@@ -289,9 +312,15 @@ rule replace_partial_genes:
                 new_record = SeqRecord(new_seq,contig, '', '')
                 SeqIO.write(new_record, f_out, "fasta") 
 
-rule combine_with_added_seq:
+rule combine_gene_replaced_with_added_seq:
     input: "meta_assembly/Homo_sapiens.EGYPTREFMETAGENES.dna.primary_assembly.fa",
            "meta_assembly/EGYPTREFV2_addto_EGYPTREFWTDB2V3PILON.fa"
     output: "meta_assembly/Homo_sapiens.EGYPTREFMETA.dna.primary_assembly.fa"
+    shell: "cat {input} > {output}"
+
+rule combine_with_added_seq:
+    input: "seq_EGYPTREFWTDBG2V3PILON/Homo_sapiens.EGYPTREFWTDBG2V3PILON.dna.primary_assembly.fa",
+           "meta_assembly/EGYPTREFV2_addto_EGYPTREFWTDB2V3PILON.fa"
+    output: "meta_assembly/Homo_sapiens.EGYPTREFMETAV2ADDED.dna.primary_assembly.fa"
     shell: "cat {input} > {output}"
 
