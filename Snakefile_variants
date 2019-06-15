@@ -301,6 +301,8 @@ rule gp_select_1000g_individual_genotypes:
     conda: "envs/genotype_pcs.yaml"
     shell: "vcftools --gzvcf {input[0]} " + \
                     "--keep {input[1]} " + \
+                    "--min-alleles 2 " + \
+                    "--max-alleles 2 " + \
                     "--maf 0.05 " + \
                     "--hwe 0.000001 " + \
                     "--recode-INFO-all " + \
@@ -406,9 +408,6 @@ rule gp_concatenate_chr_vcfs:
 #                        data (defined to be between 0 and 1, where 0 allows 
 #                        sites that are completely missing and 1 indicates no 
 #                        missing data allowed).
-# Further, we select the set of SNPs after LD pruning using 1000 genomes data
-# The reason is that LD pruning on only the 10 individuals will not select
-# truly independent SNPs because the 10 individuals are not enough.
 rule gp_filter_for_egyptian_only_pcs:
     input: "genotype_pcs/egyptians.vcf.gz"
     output: "genotype_pcs/EGYPT_GRCh38.vcf.gz"
@@ -528,15 +527,17 @@ rule gp_exclude_snps_from_high_ld_regions:
 # Anderson 2010 used: 50 5 0.2
 # Wang 2009 used: 100 ? 0.2
 # Fellay 2009 used: 1500 150 0.2 
-# Watch out: the LD pruned SNPs (to be kept, to be pruned out) are always taken
-# from the entire set of Egyptian, European and African samples we have; there
-# we use as LD pruning parameter: 1000 10 0.2
+# Watch out: Before, the LD pruned SNPs (to be kept, to be pruned out) were 
+# always taken from the entire set of Egyptian, European and African samples we 
+# have; there we use as LD pruning parameter: 1000 10 0.2 because we only had 
+# 10 Egyptians which was insufficient for LD pruning. Now we have 110 Egyptians
+# and we will perform LD pruning for the Egyptian set as well 
 rule gp_find_ld_pruned_snps:
-    input: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.bed", 
-           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.bim",
-           "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.fam"
-    output: "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.prune.in", 
-            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.prune.out"
+    input: "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.bed", 
+           "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.bim",
+           "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.fam"
+    output: "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.prune.in", 
+            "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.prune.out"
     params: in_base = lambda wildcards, input: input[0][:-4]
     conda: "envs/genotype_pcs.yaml"
     shell: "plink2 --bfile {params.in_base} " + \
@@ -544,20 +545,18 @@ rule gp_find_ld_pruned_snps:
                   "--out {params.in_base} "
 
 # Now exclude the pruned SNPs
-# We use the same set of pruned SNPs, those from the entire Egypt/Eur/Afr 
-# samples also for other subsets, because the LD pruning will not work well
-# for small numbers of samples
+# Before, we used the same set of pruned SNPs, those from the entire 
+# Egypt/Eur/Afr samples also for other subsets, because the LD pruning will not 
+# work well for small numbers of samples
 # "--exclude {input[3]} " + \ in case the file is 
 # genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.prune.out
-# For the merged 1000g and egyptian data there should be no difference,
-# but for the egyptian only data there is, because we only want to keep IDs also
-# in the 1000 G data (and no rare variants, even if they are not rare in 
-# egyptians)
+# Now that we have 110 Egyptians, we perform LD pruning for this set of 110 
+# indviduals
 rule gp_exclude_ld_pruned_snps:
     input: "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.bed", 
             "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.bim",
             "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.fam",
-            "genotype_pcs/plink/EGYPT_AFR_EUR_GRCh38_wo_ldregions.prune.in"
+            "genotype_pcs/plink/{set}_GRCh38_wo_ldregions.prune.in"
     output: "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.bed", 
             "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.bim",
             "genotype_pcs/plink/{set}_GRCh38_wo_ldregions_pruned.fam"
@@ -720,6 +719,12 @@ rule gp_plot_gt_pcs_egyptians:
     params: out_path = "genotype_pcs/figures/"
     conda: "envs/genotype_pcs.yaml"
     script: "scripts/plot_gt_pcs_egyptians.R"
+
+rule gp_genotype_pcs_all:
+    input: expand("genotype_pcs/figures/{set}_GRCh38_pca_1vs2.pdf", \
+                  set=["EGYPT_AFR_EUR","EGYPT"]),
+           expand("genotype_pcs/eigenstrat/{set}_GRCh38.tw", \
+                  set=["EGYPT_AFR_EUR","EGYPT"]),
 
 
 ################################################################################

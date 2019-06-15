@@ -77,6 +77,16 @@ EGYPTREFWTDBG2_SCAFFOLDS = ["ctg"+str(x) for x in range(1,3338)]
 
 LONGEST_EGYPTREFWTDBG2_SCAFFOLDS = ["ctg"+str(x) for x in range(1,31)]
 
+EGYPTREFMETAV2ADDED_SCAFFOLDS = ["ctg"+str(x) for x in range(1,3338)]
+# I made a list of added contigs using this command: 
+# cat seq_EGYPTREFMETAV2ADDED/Homo_sapiens.EGYPTREFMETAV2ADDED.dna.primary_assembly.fa 
+# | grep '>' | grep -v ctg | cut -c 2- > seq_EGYPTREFMETAV2ADDED/v2_added_contigs.txt
+if os.path.exists("seq_EGYPTREFMETAV2ADDED/v2_added_contigs.txt"):
+    with open("seq_EGYPTREFMETAV2ADDED/v2_added_contigs.txt") as f_in:
+        for line in f_in:
+            EGYPTREFMETAV2ADDED_SCAFFOLDS.append(line.strip("\n"))
+
+
 ################################################################################
 ######### Preprocessing of the first Novogene assembly called EGYPTREF #########
 ################################################################################
@@ -515,6 +525,41 @@ rule write_scaffold_fastas_egyptrefwtdbg2v4:
                     SeqIO.write(record, f_out, "fasta")
                     i += 1
 
+# For analyzing the V3 and subsequently pilon-polished assembly
+rule wtdbg2v3pilon_assembly:
+    input: "polish_pilon_after_wtpoa/pilon.fasta"
+    output: "seq_EGYPTREFWTDBG2V3PILON/Homo_sapiens.EGYPTREFWTDBG2V3PILON.dna.primary_assembly.fa"
+    shell: "cp {input} {output}"
+
+rule write_scaffold_fastas_egyptrefwtdbg2v3pilon:
+    input: "seq_EGYPTREFWTDBG2V3PILON/Homo_sapiens.EGYPTREFWTDBG2V3PILON.dna.primary_assembly.fa"
+    output: expand("seq_EGYPTREFWTDBG2V3PILON/Homo_sapiens.EGYPTREFWTDBG2V3PILON.dna.{scaffold}.fa", \
+                   scaffold=EGYPTREFWTDBG2_SCAFFOLDS)
+    run:
+        with open(input[0], "r") as f_in:
+            i = 0
+            for record in SeqIO.parse(f_in,"fasta"):            
+                with open(output[i], "w") as f_out:
+                    SeqIO.write(record, f_out, "fasta")
+                    i += 1
+
+# For analyzing the final meta assembly
+rule metav2added_assembly:
+    input: "meta_assembly/Homo_sapiens.EGYPTREFMETAV2ADDED.dna.primary_assembly.fa"
+    output: "seq_EGYPTREFMETAV2ADDED/Homo_sapiens.EGYPTREFMETAV2ADDED.dna.primary_assembly.fa"
+    shell: "cp {input} {output}"
+
+rule write_scaffold_fastas_egyptrefmetav2added:
+    input: "seq_EGYPTREFMETAV2ADDED/Homo_sapiens.EGYPTREFMETAV2ADDED.dna.primary_assembly.fa"
+    output: expand("seq_EGYPTREFMETAV2ADDED/Homo_sapiens.EGYPTREFMETAV2ADDED.dna.{scaffold}.fa", \
+                   scaffold=EGYPTREFMETAV2ADDED_SCAFFOLDS)
+    run:
+        with open(input[0], "r") as f_in:
+            i = 0
+            for record in SeqIO.parse(f_in,"fasta"):            
+                with open(output[i], "w") as f_out:
+                    SeqIO.write(record, f_out, "fasta")
+                    i += 1
 
 ################################################################################
 ######################### Repeat masking with repeatmasker #####################
@@ -647,11 +692,29 @@ rule repeatmasker_summary_table_egyptrefwtdbg2:
     output: "repeatmasked_EGYPTREFWTDBG2/summary.txt"
     script: "scripts/repeatmasker_summary.py"
 
+# Summarising the chromosome-wise repeatmasker summary files for Egyptref wtdbg2
+# v3 with additional pilon polishing
+rule repeatmasker_summary_table_egyptrefwtdbg2v3pilon:
+    input: expand("repeatmasked_EGYPTREFWTDBG2V3PILON/Homo_sapiens.EGYPTREFWTDBG2V3PILON.dna.{x}.fa.tbl", \
+                  x=EGYPTREFWTDBG2_SCAFFOLDS)
+    output: "repeatmasked_EGYPTREFWTDBG2V3PILON/summary.txt"
+    script: "scripts/repeatmasker_summary.py"
+
+# Summarising the chromosome-wise repeatmasker summary files for Egyptref meta
+# assembly with egyptrefv2 sequence added
+rule repeatmasker_summary_table_egyptrefmetav2added:
+    input: expand("repeatmasked_EGYPTREFMETAV2ADDED/Homo_sapiens.EGYPTREFMETAV2ADDED.dna.{x}.fa.tbl", \
+                  x=EGYPTREFMETAV2ADDED_SCAFFOLDS)
+    output: "repeatmasked_EGYPTREFMETAV2ADDED/summary.txt"
+    script: "scripts/repeatmasker_summary.py"
+
+
 # Making a repeatmasker stat table over all chromosomes, one line for EGYPTREF,
 # one line for GRCh38
+# assembly=["EGYPTREFWTDBG2V2","EGYPTREFWTDBG2","EGYPTREF","EGYPTREFV2","CEGYPTREF","CEGYPTREFV2","AK1","YORUBA","GRCh38"]
 rule comparison_repeatmasker:
     input: expand("repeatmasked_{assembly}/summary.txt", \
-                  assembly=["EGYPTREFWTDBG2V2","EGYPTREFWTDBG2","EGYPTREF","EGYPTREFV2","CEGYPTREF","CEGYPTREFV2","AK1","YORUBA","GRCh38"])
+                  assembly=["EGYPTREFMETAV2ADDED","EGYPTREFWTDBG2V3PILON","EGYPTREFV2","AK1","YORUBA","GRCh38"])
     output: "results/repeatmasker_comparison.txt"
     script: "scripts/repeatmasker_comparison.py"
 

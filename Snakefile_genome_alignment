@@ -226,7 +226,7 @@ rule mummerplot_all:
     input: expand("{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}_{filter}.ps", \
                     aligntype=["align"], \
                     a1="GRCh38", \
-                    a2="EGYPTREFWTDBG2V2", \
+                    a2=["EGYPTREFMETAV2ADDED","EGYPTREFWTDBG2V3PILON","EGYPTREFV2","AK1","YORUBA"], \
                     filter=["nofilter","1to1"])
 
 rule mummerplot_chromosomewise:
