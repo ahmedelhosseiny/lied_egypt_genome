@@ -1,0 +1,336 @@
+# Extracting various information within specified genes (i.e. gene-centric)
+
+from global_variables import *
+
+# These are some genes of interest (ABCC7=CFTR, HD=HDDC3?, Factor V=F5)
+#GENES = ["CFTR","HDDC3","DMD","BRCA1","BRCA2","TP53","EGFR","APP","PSEN1","F5", \
+#         "CARD11","LAMA4","MRC1","USH2A","PRAMEF17","C1QTNF12","CFAP74","MMEL1", \
+#         "TTC34","GUCY1A1"]
+GENES = ["BRCA2"]
+
+rule gc_all:
+    input: expand("gene_centric/{gene}/EGYPTREF.{gene}.pb.bam", gene=GENES),
+           expand("gene_centric/{gene}/EGYPTREF.{gene}.{lib}_10x.bam", \
+                  lib=[x.split("_")[0] for x in ILLUMINA_10X_LIBS], gene=GENES),
+           expand("gene_centric/{gene}/EGYPTREF.{gene}.rnaseq.bam", gene=GENES),
+           expand("gene_centric/{gene}/{gene}_overlapping.gtf", gene=GENES),
+           expand("gene_centric/{gene}/{gene}_egyptians.vcf.gz",gene=GENES),
+           expand("gene_centric/{gene}/{gene}_dbsnp.vcf.gz",gene=GENES),
+           expand("gene_centric/{gene}/{gene}_1000g.vcf.gz",gene=GENES),
+           expand("gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_stat.out", \
+                  gene=GENES,aligntype=["align"],a1="GRCh38", \
+                  a2=["EGYPTREFMETAV2ADDED","EGYPTREFV2","EGYPTREFWTDBG2V3PILON","AK1","YORUBA"])
+
+################################################################################
+############# Extracting gene annotation information (gene-centric) ############
+################################################################################
+
+# Therefore, obtain a recent Ensembl annotation file first
+rule gc_get_ensembl_gene_annotation_gtf:
+    output: temp("gc_annotations/Homo_sapiens.GRCh38.95.gtf.gz")
+    shell: "wget -P gc_annotations " + \
+           "ftp://ftp.ensembl.org/pub/release-95/gtf/homo_sapiens/" + \
+           "Homo_sapiens.GRCh38.95.gtf.gz "
+
+rule gc_unzip_ensembl_gene_annotation_gtf:
+    input: "gc_annotations/Homo_sapiens.GRCh38.95.gtf.gz"
+    output: "gc_annotations/Homo_sapiens.GRCh38.95.gtf"
+    shell: "gzip -d {input}"
+
+rule gc_get_gene_annotation:
+    input: "gc_annotations/Homo_sapiens.GRCh38.95.gtf"
+    output: "gene_centric/{gene}/{gene}.gtf"
+    shell: "cat {input} | grep '#' > {output}; " + \
+           "cat {input} | grep 'gene_name \"{wildcards.gene}\";' >> {output}"
+
+# How many bases left and right of gene boundaries to consider 
+WINDOW = {
+    "CFTR": [100000,100000],
+    "HDDC3": [100000,100000],
+    "DMD": [100000,100000],
+    "BRCA1": [100000,100000],
+    "BRCA2": [100000,100000],
+    "TP53": [100000,100000],
+    "EGFR": [100000,100000],
+    "APP": [100000,100000],
+    "PSEN1": [100000,100000],
+    "F5": [100000,100000],
+    "CARD11": [100000,100000],
+    "LAMA4": [100000,100000],
+    "MRC1": [100000,100000],
+    "USH2A": [100000,100000],
+    "FADS1": [100000,100000],
+    "FADS2": [100000,100000],
+    "PRAMEF17": [100000,100000],
+    "C1QTNF12": [100000,100000],
+    "CFAP74": [100000,100000],
+    "MMEL1": [100000,100000],
+    "TTC34": [100000,100000],
+    "GUCY1A1": [100000,100000]
+}
+rule gc_get_start_end_position:
+    input: "gene_centric/{gene}/{gene}.gtf"
+    output: "gene_centric/{gene}/{gene}.bed"
+    run:
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            f_out.write("# Custom bed file for region around gene\n")
+            for line in f_in:
+                if line[0] == "#":
+                    continue
+                s = line.split("\t")
+                if s[2] == "gene":
+                    chr = s[0]
+                    start = str(int(s[3]) - WINDOW[wildcards.gene][0])
+                    end = str(int(s[4]) + WINDOW[wildcards.gene][1])
+                    strand = s[6]
+                    f_out.write("\t".join([chr,start,end,'.','.',strand])+"\n")
+
+# This is a version of the bed file with trailing "chr", because this is needed 
+# for the SNP calling file of Matthias
+rule gc_get_start_end_position_with_chr:
+    input: "gene_centric/{gene}/{gene}.gtf"
+    output: "gene_centric/{gene}/{gene}_with_chr.bed"
+    run:
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            f_out.write("# Custom bed file for region around gene\n")
+            for line in f_in:
+                if line[0] == "#":
+                    continue
+                s = line.split("\t")
+                if s[2] == "gene":
+                    chr = s[0]
+                    start = str(int(s[3]) - WINDOW[wildcards.gene][0])
+                    end = str(int(s[4]) + WINDOW[wildcards.gene][1])
+                    strand = s[6]
+                    f_out.write("\t".join(["chr"+chr,start,end,'.','.',strand])+"\n")
+
+rule gc_get_overlapping_genes:
+    input: "gc_annotations/Homo_sapiens.GRCh38.95.gtf",
+           "gene_centric/{gene}/{gene}.bed"
+    output: "gene_centric/{gene}/{gene}_overlapping.gtf"
+    run:
+        with open(input[1],"r") as f_in:
+            for line in f_in:
+                if line[0] == "#":
+                    continue
+                s = line.split('\t')
+                [q_chrom,q_start,q_end] = s[:3]
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                if line[0] == "#":
+                    continue
+                s = line.split("\t")
+                chrom,start,end = s[:3]
+                if chrom == q_chrom:
+                    if q_start<start<q_end or q_start<end<q_end:
+                        f_out.write(line)
+
+
+################################################################################
+################ Extracting mapping information (gene-centric) #################
+################################################################################
+
+rule gc_get_mapped_pb_egyptref_reads:
+    input: bam="map_pb_GRCh38/EGYPTREF.srt.bam",
+           bed="gene_centric/{gene}/{gene}.bed"
+    output: "gene_centric/{gene}/EGYPTREF.{gene}.pb.bam",
+            "gene_centric/{gene}/EGYPTREF.{gene}.pb.bam.bai",
+    shell: "samtools view -b -L {input.bed} {input.bam} > {output[0]}; " + \
+           "samtools index {output[0]} "
+
+rule gc_get_mapped_10x_egyptref_reads:
+    input: bam="map_10x_GRCh38/{lib}.bam",
+           bed="gene_centric/{gene}/{gene}.bed"
+    output: "gene_centric/{gene}/EGYPTREF.{gene}.{lib}_10x.bam",
+            "gene_centric/{gene}/EGYPTREF.{gene}.{lib}_10x.bam.bai",
+    shell: "samtools view -b -L {input.bed} {input.bam} > {output[0]}; " + \
+           "samtools index {output[0]} "
+
+rule gc_sync_rnaseq:
+    input: "/data/lied_egypt_genome/lied_egypt_rnaseq/data/phaser_sources/SI2Aligned_twoPass.sortedByCoord.chr.out.bam"
+    output: "map_rnaseq/EGYPTREF_rnaseq.bam"
+    shell: "ln -s {input} {output}"
+
+rule gc_get_mapped_rnaseq_egyptref_reads:
+    input: bam="map_rnaseq/EGYPTREF_rnaseq.bam",
+           bed="gene_centric/{gene}/{gene}.bed"
+    output: "gene_centric/{gene}/EGYPTREF.{gene}.rnaseq.bam",
+            "gene_centric/{gene}/EGYPTREF.{gene}.rnaseq.bam.bai",
+    shell: "samtools view -b -L {input.bed} {input.bam} > {output[0]}; " + \
+           "samtools index {output[0]} "
+
+rule gc_get_mapped_egyptref_reads_all:
+    input: expand("gene_centric/{gene}/EGYPTREF.{gene}.pb.bam", gene=GENES),
+           expand("gene_centric/{gene}/EGYPTREF.{gene}.{lib}_10x.bam", \
+                  lib=[x.split("_")[0] for x in ILLUMINA_10X_LIBS], gene=GENES),
+           expand("gene_centric/{gene}/EGYPTREF.{gene}.rnaseq.bam", gene=GENES),
+           expand("gene_centric/{gene}/{gene}_overlapping.gtf", gene=GENES)
+
+
+################################################################################
+################## Extracting variant information (gene-centric) ###############
+################################################################################
+
+# Getting the latest dbsnp version for GRCh38, this is version 151; I am 
+# getting the VCF file deposited under GATK, which is very slightly larger than
+# the file under VCF, but I didn't check the precise difference and there is 
+# no note in the READMEs.
+rule gc_get_known_snps_from_dbsnp:
+    output: "gc_dbsnp_GRCh38/All_20180418.vcf.gz"
+    shell: "wget -P gc_dbsnp_GRCh38 " + \
+           "ftp://ftp.ncbi.nlm.nih.gov/snp/organisms/human_9606/VCF/GATK/All_20180418.vcf.gz"
+
+# ... and getting its index
+rule gc_get_index_of_known_snps_from_dbsnp:
+    output: "gc_dbsnp_GRCh38/All_20180418.vcf.gz.tbi"
+    shell: "wget -P gc_dbsnp_GRCh38 " + \
+           "ftp://ftp.ncbi.nlm.nih.gov/snp/organisms/human_9606/VCF/GATK/All_20180418.vcf.gz.tbi"
+
+# Symlinking the VCF file with Egyptian SNP calling
+rule gc_symlink_var_file:
+    input: "/data/lied_egypt_genome/output_wgs/vars.clean.vcf.gz"
+    output: "gene_centric/egyptians.vcf.gz"
+    shell: "ln -s {input} {output}"
+
+# Get the SNP calls of the Egyptians for the specified genes
+rule gc_get_variants:
+    input: vcf="gene_centric/egyptians.vcf.gz",
+           bed="gene_centric/{gene}/{gene}_with_chr.bed"
+    output: "gene_centric/{gene}/{gene}_egyptians.vcf.gz"
+    shell: "vcftools --gzvcf {input.vcf} " + \
+                    "--bed {input.bed} " + \
+                    "--recode " + \
+                    "--recode-INFO-all " + \
+                    "--stdout " + \
+                    "| bgzip > {output}"
+
+rule gc_get_dbsnp_variants:
+    input: vcf="gc_dbsnp_GRCh38/All_20180418.vcf.gz",
+           bed="gene_centric/{gene}/{gene}.bed"
+    output: "gene_centric/{gene}/{gene}_dbsnp.vcf.gz"
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input.vcf} " + \
+                    "--bed {input.bed} " + \
+                    "--recode " + \
+                    "--recode-INFO-all " + \
+                    "--stdout " + \
+                    "| bgzip > {output}"
+
+rule gc_get_1000g_variants:
+    input: vcf="1000_genomes/ALL.GRCh38.genotypes.20170504.vcf.gz",
+           bed="gene_centric/{gene}/{gene}.bed"
+    output: "gene_centric/{gene}/{gene}_1000g.vcf.gz"
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input.vcf} " + \
+                    "--bed {input.bed} " + \
+                    "--recode " + \
+                    "--recode-INFO-all " + \
+                    "--stdout " + \
+                    "| bgzip > {output}"
+
+rule gc_get_variants_all:
+    input: expand("gene_centric/{gene}/{gene}_egyptians.vcf.gz",gene=GENES),
+           expand("gene_centric/{gene}/{gene}_dbsnp.vcf.gz",gene=GENES),
+           expand("gene_centric/{gene}/{gene}_1000g.vcf.gz",gene=GENES)
+
+
+################################################################################
+################## Extracting Annovar annotations (gene-centric) ###############
+################################################################################
+
+
+################################################################################
+################## Extracting VEP annotations (gene-centric) ###################
+################################################################################
+
+
+################################################################################
+############# Extracting assembly alignment information (gene-centric) #########
+################################################################################
+
+rule gc_delta_format:
+    input: align="{aligntype}_nucmer_{a1}_vs_{a2}/{a1}_vs_{a2}_{filter}.delta",
+           gene="gene_centric/{gene}/{gene}.bed"
+    output: "gene_centric/{gene}/{aligntype}_{gene}_{a1}_vs_{a2}_{filter}.delta"
+    script: "scripts/filter_delta_alignment_file.py"
+
+# Running the tool nucdiff to compare two assemblies based on alignment with 
+# mummer, which is also performed by the nucdiff tool; therefore, use 1to1 
+# alignments, such that at every position only one alignment matches
+# "--filter_opt '-l 1000 -i 99' " + 
+rule gc_run_nucdiff:
+    input: ref="seq_{a1}/Homo_sapiens.{a1}.dna.primary_assembly.fa", 
+           query="seq_{a2}/Homo_sapiens.{a2}.dna.primary_assembly.fa", 
+           delta="gene_centric/{gene}/{aligntype}_{gene}_{a1}_vs_{a2}_1to1.delta"
+    output: "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}.delta",
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_snps.gff", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_struct.gff", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_blocks.gff", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_snps.vcf", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_query_snps.gff", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_query_struct.gff", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_query_blocks.gff", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_query_snps.vcf", 
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_stat.out"
+    params: outdir=lambda wildcards: "gene_centric/"+wildcards.gene+"/nucdiff_"+wildcards.aligntype+"_"+wildcards.a1+"_vs_"+wildcards.a2
+    conda: "envs/nucdiff.yaml"
+    shell: "cp {input.delta} {output[0]}; " + \
+           "nucdiff {input.ref} {input.query} {params.outdir} " + \
+           "{wildcards.a1}_vs_{wildcards.a2} " + \
+           "--vcf yes " + \
+           "--delta_file {input.delta} " + \
+           "--proc 8"
+
+rule gc_run_nucdiff_all:
+    input: expand("gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_stat.out", \
+                  gene=GENES,aligntype=["align"],a1="GRCh38", \
+                  a2=["AK1"])
+                  #a2=["EGYPTREFMETAV2ADDED","EGYPTREFV2","EGYPTREFWTDBG2V3PILON","AK1","YORUBA"])
+
+# VCF file from assembly here gets annotated with dbsnp IDs
+
+# Compressing and indexing of files to be used with vcf-merge
+rule gc_index_snps:
+    input: "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_snps.vcf"
+    output: "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_snps.vcf.gz",
+            "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_snps.vcf.gz.tbi"
+    conda: "envs/rsid_annotate.yaml"
+    shell: "cat {input} | bgzip > {output[0]}; tabix -p vcf {output[0]}"
+
+rule gc_annotate_rsids:
+    input: vcf="gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_snps.vcf.gz",
+           vcf_index="gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_snps.vcf.gz.tbi",
+           dbsnp="gc_dbsnp_GRCh38/All_20180418.vcf.gz.vcf.gz",
+           dbsnp_index="gc_dbsnp_GRCh38/All_20180418.vcf.gz.vcf.gz.tbi"
+    output: "gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_ref_snps_annotated.vcf.gz"
+    conda: "envs/rsid_annotate.yaml"
+    shell: "bcftools annotate --annotations {input.dbsnp} " + \
+                             "--columns ID " + \
+                             "--output {output} " + \
+                             "--output-type z " + \
+                             "{input.vcf} "
+
+# Plot the aligned contigs/scaffolds for this region using mummerplot
+# An example plot is gene_centric/FADS1/mummerplot_align_GRCh38_vs_CEGYPTREFV2/GRCh38_vs_CEGYPTREFV2_nofilter_11_000095F.gp
+rule gc_mummerplot:
+    input: "gene_centric/{gene}/{aligntype}_{gene}_{a1}_vs_{a2}_{filter}.delta"
+    output: "gene_centric/{gene}/mummerplot_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_{filter}_{r}_{q}.gp", 
+            "gene_centric/{gene}/mummerplot_{aligntype}_{a1}_vs_{a2}/{a1}_vs_{a2}_{filter}_{r}_{q}.ps"
+    params: outprefix=lambda wildcards: "gene_centric/"+wildcards.gene+ \
+                     "/mummerplot_"+wildcards.aligntype+"_"+wildcards.a1+ \
+                     "_vs_"+wildcards.a2+"/"+wildcards.a1+"_vs_"+wildcards.a2+ \
+                     "_"+wildcards.filter+"_"+wildcards.r+"_"+wildcards.q
+    conda: "envs/mummer.yaml"
+    shell: "mummerplot " + \ 
+           "-p {params.outprefix} " + \
+           "--postscript " + \
+           "--layout " + \
+           "--medium " + \
+           "-title {wildcards.gene} " + \
+           "-r {wildcards.r} " + \
+           "-q {wildcards.q} " + \
+           "--SNP " + \
+#           "-x [*:*] " + \
+#           "-y [*:*] " + \
+           "{input[0]}; " + \
+           "gnuplot {output[0]}; "

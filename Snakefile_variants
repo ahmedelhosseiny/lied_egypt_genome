@@ -847,6 +847,150 @@ rule av_exonic_effect_exonic_rare_egyptiancommon:
     shell: "cat {input} | sort | uniq | cut -f 9 | sort | uniq -c > {output}"  
 
 
+
+################################################################################
+############ Dealing with VEP annotated variants and filtering them ############
+################################################################################
+
+# This is linking to the file annotated by Matthias using VEP 
+rule symlink_snv_file:
+    input: "/data/lied_egypt_genome/output_wgs/vep/vep.vcf.gz"
+    output: "vep_annotation/vep.vcf.gz"
+    shell: "ln -s {input} {output}"
+
+# Select common variants in the Egyptian cohort for further consideration. 
+# These should be 
+# * biallelic (otherwise gets too complicated) (--min-alleles/--max-alleles 2)
+# * no indels (also too complicated) (--remove-indels)
+# * no missing genotypes (--max-missing)
+# * have minor allel frequency of 5% (--maf)
+# These are the variants for further characterization concerning population
+# frequencies
+rule extract_egyptian_common_variants:
+    input: "vep_annotation/vep.vcf.gz"
+    output: "vep_annotation/vep_egyptian_common.vcf.gz"
+    params: log_base=lambda wildcards, output: output[0][:-7]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input} " + \
+                    "--min-alleles 2 " + \
+                    "--max-alleles 2 " + \
+                    "--remove-indels " + \
+                    "--remove-indels " + \
+                    "--max-missing 1 " + \
+                    "--maf 0.05 " + \
+                    "--recode-INFO-all " + \
+                    "--recode " + \
+                    "--out {params.log_base} " + \
+                    "--stdout | bgzip > {output}"
+
+rule compute_egyptian_af:
+    input: "vep_annotation/vep_egyptian_common.vcf.gz"
+    output: "vep_annotation/egyptian_af.frq"
+    params: out_base=lambda wildcards, output: output[0][:-4]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input} --freq --out {params.out_base}"
+
+# Here, we extract the SNP information and for every SNP all annotated allele
+# frequencies; these are
+# CHROM,POS,ID,REF,ALT: VCF file fields
+# Add allele frequency from continental populations (AFR,AMR,EAS,EUR,SAS) of 
+# 1000 Genomes Phase 3: AF,AFR_AF,AMR_AF,EAS_AF,EUR_AF,SAS_AF,AA_AF,EA_AF
+# Include allele frequency from Genome Aggregation Database (gnomAD) exome 
+# populations. Note only data from the gnomAD exomes are included:
+# gnomAD_AF,gnomAD_AFR_AF,gnomAD_AMR_AF,gnomAD_ASJ_AF,gnomAD_EAS_AF,gnomAD_FIN_AF,gnomAD_NFE_AF,gnomAD_OTH_AF,gnomAD_SAS_AF
+# Report the highest allele frequency observed in any population from 1000 
+# genomes, ESP or gnomAD: MAX_AF, MAX_AF_POPS
+AF_FIELDS = ["CHROM","POS","ID","REF","ALT"] + \
+            ["AF","AFR_AF","AMR_AF","EAS_AF","EUR_AF","SAS_AF","AA_AF","EA_AF"] + \
+            ["gnomAD_AF","gnomAD_AFR_AF","gnomAD_AMR_AF","gnomAD_ASJ_AF"] + \
+            ["gnomAD_EAS_AF","gnomAD_FIN_AF","gnomAD_NFE_AF","gnomAD_OTH_AF","gnomAD_SAS_AF"] + \
+            ["MAX_AF","MAX_AF_POPS"]
+AF_HEADER = "\t".join(AF_FIELDS)          
+rule annotated_af_by_population:
+    input: "vep_annotation/vep_egyptian_common.vcf.gz"
+    output: "vep_annotation/af_annotated.txt"
+    shell: "echo \"{AF_HEADER}\" > {output[0]}; " + \
+           "bcftools query -f'[%CHROM\t%POS\t%ID\t%REF\t%ALT\t%INFO/CSQ[0]\n]' {input} " + \
+           "| cut -d ',' -f 1 " + \
+           "| sed \"s/|/\t/g\" " + \
+           "| cut -f 1-5,49-67 >> {output}; "
+
+rule extract_egyptian_af:
+    input: "vep_annotation/egyptian_af.frq"
+    output: "vep_annotation/egyptian_af_only.frq"
+    shell: "echo \"EGP_AF\" > {output}; " + \
+           "tail -n+2 {input} | cut -d ':' -f 3 | grep -v \"\\n\" >> {output}"
+
+rule add_egyptian_af_to_af_annotation:
+    input: "vep_annotation/af_annotated.txt",
+           "vep_annotation/egyptian_af_only.frq"
+    output: "vep_annotation/egyptian_af_annotated.txt"
+    shell: "paste {input} > {output}"
+
+rule select_population_specific_variants:
+    input: "vep_annotation/egyptian_af_annotated.txt"
+    output: "vep_annotation/egyptian_pop_specific.txt"
+    run:
+        pops_1000g = ["AFR","AMR","EAS","EUR","SAS"]
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                # Write updated header
+                if line[:5] == "CHROM":
+                    f_out.write(line.strip("\n")+"\tSPECIFIC_POP"+"\n")
+                    continue
+                s = line.strip("\n").split("\t")
+                # Get 1000g population maf needed
+                af = s[5]
+                afs_1000g = s[6:11]
+                # If fields are empty, these variants don't occur in 1000g
+                # and we set afs to zero
+                if afs_1000g[0] == "":
+                    # Make sure there is no info for any 1000g pop
+                    assert(afs_1000g == ["" for i in range(5)])
+                    # And set afs to zero
+                    afs_1000g = [0 for i in range(5)]
+                afs_1000g = [float(x) for x in afs_1000g]
+                # If the overall allele frequency is not given, approximate it
+                # by computing an average allele frequency over the 5 pops
+                if af == "":
+                    af = 0.2*sum([float(x) for x in afs_1000g])
+                else:
+                    af = float(af)
+                # Just check that all variants in this list are in fact common
+                # in Egyptians (MAF>5%)
+                af_egyptian = float(s[-1])
+                # If overall af is greater than 0.5 then the reference allele
+                # is the minor allele and we compute all allele frequencies
+                # as 1 minus the specified allele frequency
+                if af>0.5:
+                    afs_1000g = [1.0-pop_af for pop_af in afs_1000g]
+                    af_egyptian = 1.0-af_egyptian
+                # Just check that all variants in this list are in fact common
+                # in Egyptians (MAF>5%)
+                assert(af_egyptian>=0.05)
+                # Check if the current SNP is population-specific for any of the 
+                # 5 continental populations
+                for i in range(5):
+                    # If not common in pop, continue
+                    if afs_1000g[i]<0.05:
+                        continue
+                    num_pop_rare = 0
+                    for j in range(5):
+                        if j == i:
+                            continue
+                        if afs_1000g[j]<=0.01:
+                            num_pop_rare += 1
+                    if num_pop_rare == 4:
+                        f_out.write(line.strip("\n")+"\t"+pops_1000g[i]+"\n")
+                # Check if the current SNP is Egyptian population-specific
+                for i in range(5):
+                    # If not common in pop, continue
+                    if not afs_1000g[i]<=0.01:
+                        break
+                    if i == 4:
+                        f_out.write(line.strip("\n")+"\tEGP\n")
+
+
 ################################################################################
 ####### Performing preprocessing and statistics for SVs called by Axel #########
 ################################################################################

@@ -714,7 +714,7 @@ rule repeatmasker_summary_table_egyptrefmetav2added:
 # assembly=["EGYPTREFWTDBG2V2","EGYPTREFWTDBG2","EGYPTREF","EGYPTREFV2","CEGYPTREF","CEGYPTREFV2","AK1","YORUBA","GRCh38"]
 rule comparison_repeatmasker:
     input: expand("repeatmasked_{assembly}/summary.txt", \
-                  assembly=["EGYPTREFMETAV2ADDED","EGYPTREFWTDBG2V3PILON","EGYPTREFV2","AK1","YORUBA","GRCh38"])
+                  assembly=["EGYPTREFWTDBG2V3PILON","EGYPTREFV2","AK1","YORUBA","GRCh38"])
     output: "results/repeatmasker_comparison.txt"
     script: "scripts/repeatmasker_comparison.py"
 
