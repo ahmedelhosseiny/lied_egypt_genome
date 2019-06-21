@@ -621,11 +621,39 @@ rule run_repeatmasker_primary_assembly:
 # Note: For AK1 and YORUBA, there are the following scaffolds, for which 
 # repeatmasker does not generate the output files, because "No repetitive 
 # sequences were detected". For these, I generated the fa.masked file manually
-# by copying the input file; further, I manually 
-# AK1: Scaffold1437, Scaffold0873, Scaffold2568, Scaffold2697, Scaffold2245
-# Yoruba: HS_LKPB_CHRUN_SCAFFOLD_{256,672,296,980,165,472,1137,1147,1547,1411,
-#         1355,1638,1014}
-# EGYPTREFV2: 
+# by copying the input file;
+# AK1.Scaffold0873
+# AK1.Scaffold1437
+# EGYPTREFV2.fragScaff_scaffold_39_pilon
+# EGYPTREFV2.original_scaffold_1014_pilon
+# EGYPTREFV2.original_scaffold_1067_pilon
+# EGYPTREFV2.original_scaffold_1078_pilon
+# EGYPTREFV2.original_scaffold_1186_pilon
+# EGYPTREFV2.original_scaffold_1349_pilon
+# EGYPTREFV2.original_scaffold_1572_pilon
+# EGYPTREFV2.original_scaffold_1632_pilon
+# EGYPTREFV2.original_scaffold_1643_pilon
+# EGYPTREFV2.original_scaffold_1662_pilon
+# EGYPTREFV2.original_scaffold_1701_pilon
+# EGYPTREFV2.original_scaffold_399_pilon
+# EGYPTREFV2.original_scaffold_499_pilon
+# EGYPTREFV2.original_scaffold_535_pilon
+# EGYPTREFV2.original_scaffold_731_pilon
+# EGYPTREFV2.original_scaffold_778_pilon
+# EGYPTREFV2.original_scaffold_956_pilon
+# EGYPTREFWTDBG2V3PILON.ctg1102
+# EGYPTREFWTDBG2V3PILON.ctg1288
+# EGYPTREFWTDBG2V3PILON.ctg1391
+# EGYPTREFWTDBG2V3PILON.ctg1501
+# EGYPTREFWTDBG2V3PILON.ctg1825
+# EGYPTREFWTDBG2V3PILON.ctg2771
+# EGYPTREFWTDBG2V3PILON.ctg2943
+# EGYPTREFWTDBG2V3PILON.ctg3180
+# EGYPTREFWTDBG2V3PILON.ctg3319
+# YORUBA.HS_LKPB_CHRUN_SCAFFOLD_1014
+# YORUBA.HS_LKPB_CHRUN_SCAFFOLD_1147
+# YORUBA.HS_LKPB_CHRUN_SCAFFOLD_1638
+# YORUBA.HS_LKPB_CHRUN_SCAFFOLD_256
 rule run_repeatmasker_chromosomewise:
     input: expand("repeatmasked_GRCh38/Homo_sapiens.GRCh38.dna.{x}.fa.tbl", \
                   x=CHR_GRCh38),
@@ -714,7 +742,7 @@ rule repeatmasker_summary_table_egyptrefmetav2added:
 # assembly=["EGYPTREFWTDBG2V2","EGYPTREFWTDBG2","EGYPTREF","EGYPTREFV2","CEGYPTREF","CEGYPTREFV2","AK1","YORUBA","GRCh38"]
 rule comparison_repeatmasker:
     input: expand("repeatmasked_{assembly}/summary.txt", \
-                  assembly=["EGYPTREFWTDBG2V3PILON","EGYPTREFV2","AK1","YORUBA","GRCh38"])
+                  assembly=["EGYPTREFMETAV2ADDED","EGYPTREFWTDBG2V3PILON","EGYPTREFV2","AK1","YORUBA","GRCh38"])
     output: "results/repeatmasker_comparison.txt"
     script: "scripts/repeatmasker_comparison.py"
 

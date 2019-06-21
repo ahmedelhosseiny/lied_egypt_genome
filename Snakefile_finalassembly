@@ -650,12 +650,12 @@ rule minimap_sort_pb_grch38:
 ################################################################################
 
 rule get_gff_file:
-    output: temp("annotations/Homo_sapiens.GRCh38.94.gff3.gz")
-    shell: "wget -P annotations ftp://ftp.ensembl.org/pub/release-94/gff3/homo_sapiens/Homo_sapiens.GRCh38.94.gff3.gz"
+    output: temp("annotations/Homo_sapiens.GRCh38.95.gff3.gz")
+    shell: "wget -P annotations ftp://ftp.ensembl.org/pub/release-95/gff3/homo_sapiens/Homo_sapiens.GRCh38.95.gff3.gz"
 
 rule extract_gff_file:
-    input:  "annotations/Homo_sapiens.GRCh38.94.gff3.gz"
-    output: "annotations/Homo_sapiens.GRCh38.94.gff3"
+    input:  "annotations/Homo_sapiens.GRCh38.95.gff3.gz"
+    output: "annotations/Homo_sapiens.GRCh38.95.gff3"
     shell: "gzip -cdk {input} > {output}"
 
 # -r  Reference genome file. Optional. Many metrics can't be evaluated without 
@@ -684,7 +684,7 @@ rule extract_gff_file:
 ASSEMBLIES = ["EGYPTREFMETAV2ADDED","EGYPTREFWTDBG2V3PILON","EGYPTREFV2","AK1","YORUBA"]
 rule run_quast:
     input: "seq_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa",
-           "annotations/Homo_sapiens.GRCh38.94.gff3",
+           "annotations/Homo_sapiens.GRCh38.95.gff3",
            expand("seq_{a}/Homo_sapiens.{a}.dna.primary_assembly.fa", \
                   a=ASSEMBLIES)
     output: "quast_results/quast.done"

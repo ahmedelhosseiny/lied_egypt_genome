@@ -42,7 +42,7 @@ for fname in fnames_in:
                  spec = splitted[0]
             spec = spec.strip()
             if item == "file name":
-                assert(spec == fname.split("/")[1][:-4])
+                assert(spec == fname.split("/")[1][:-4] or spec == "NA")
                 fname_wo_path = spec
             elif item == "sequences":
                 assert(spec == "1")

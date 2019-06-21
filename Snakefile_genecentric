@@ -3,15 +3,16 @@
 from global_variables import *
 
 # These are some genes of interest (ABCC7=CFTR, HD=HDDC3?, Factor V=F5)
-#GENES = ["CFTR","HDDC3","DMD","BRCA1","BRCA2","TP53","EGFR","APP","PSEN1","F5", \
-#         "CARD11","LAMA4","MRC1","USH2A","PRAMEF17","C1QTNF12","CFAP74","MMEL1", \
-#         "TTC34","GUCY1A1"]
-GENES = ["BRCA2"]
+GENES = ["CFTR","HDDC3","DMD","BRCA1","BRCA2","TP53","EGFR","APP","PSEN1","F5", \
+         "CARD11","LAMA4","MRC1","USH2A","PRAMEF17","C1QTNF12","CFAP74","MMEL1", \
+         "TTC34","GUCY1A1"]
+#GENES = ["BRCA2"]
 
 rule gc_all:
     input: expand("gene_centric/{gene}/EGYPTREF.{gene}.pb.bam", gene=GENES),
            expand("gene_centric/{gene}/EGYPTREF.{gene}.{lib}_10x.bam", \
                   lib=[x.split("_")[0] for x in ILLUMINA_10X_LIBS], gene=GENES),
+           expand("gene_centric/{gene}/EGYPTREF.{gene}.phased10x.bam", gene=GENES),
            expand("gene_centric/{gene}/EGYPTREF.{gene}.rnaseq.bam", gene=GENES),
            expand("gene_centric/{gene}/{gene}_overlapping.gtf", gene=GENES),
            expand("gene_centric/{gene}/{gene}_egyptians.vcf.gz",gene=GENES),
@@ -143,6 +144,14 @@ rule gc_get_mapped_10x_egyptref_reads:
            bed="gene_centric/{gene}/{gene}.bed"
     output: "gene_centric/{gene}/EGYPTREF.{gene}.{lib}_10x.bam",
             "gene_centric/{gene}/EGYPTREF.{gene}.{lib}_10x.bam.bai",
+    shell: "samtools view -b -L {input.bed} {input.bam} > {output[0]}; " + \
+           "samtools index {output[0]} "
+
+rule gc_get_phased_10x_egyptref_reads:
+    input: bam="longranger_phasing/EGYPTREF/outs/phased_possorted_bam.bam",
+           bed="gene_centric/{gene}/{gene}.bed"
+    output: "gene_centric/{gene}/EGYPTREF.{gene}.phased10x.bam",
+            "gene_centric/{gene}/EGYPTREF.{gene}.phased10x.bam.bai",
     shell: "samtools view -b -L {input.bed} {input.bam} > {output[0]}; " + \
            "samtools index {output[0]} "
 
