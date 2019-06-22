@@ -149,7 +149,7 @@ rule gc_get_mapped_10x_egyptref_reads:
 
 rule gc_get_phased_10x_egyptref_reads:
     input: bam="longranger_phasing/EGYPTREF/outs/phased_possorted_bam.bam",
-           bed="gene_centric/{gene}/{gene}.bed"
+           bed="gene_centric/{gene}/{gene}_with_chr.bed"
     output: "gene_centric/{gene}/EGYPTREF.{gene}.phased10x.bam",
             "gene_centric/{gene}/EGYPTREF.{gene}.phased10x.bam.bai",
     shell: "samtools view -b -L {input.bed} {input.bam} > {output[0]}; " + \
@@ -162,7 +162,7 @@ rule gc_sync_rnaseq:
 
 rule gc_get_mapped_rnaseq_egyptref_reads:
     input: bam="map_rnaseq/EGYPTREF_rnaseq.bam",
-           bed="gene_centric/{gene}/{gene}.bed"
+           bed="gene_centric/{gene}/{gene}_with_chr.bed"
     output: "gene_centric/{gene}/EGYPTREF.{gene}.rnaseq.bam",
             "gene_centric/{gene}/EGYPTREF.{gene}.rnaseq.bam.bai",
     shell: "samtools view -b -L {input.bed} {input.bam} > {output[0]}; " + \

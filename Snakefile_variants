@@ -1,6 +1,7 @@
 #kate:syntax python;
 
 from global_variables import *
+import gzip
 
 # Rules to be executed for new assemblies: compute_content_and_assembly_numbers,
 # repeatmasker_summary_table_egyptrefv2, align_assemblies_with_mummer_all, 
@@ -989,6 +990,59 @@ rule select_population_specific_variants:
                         break
                     if i == 4:
                         f_out.write(line.strip("\n")+"\tEGP\n")
+
+rule snp_pos_for_pop_specific_vars:
+    input: "vep_annotation/egyptian_pop_specific.txt"
+    output: "vep_annotation/egyptian_pop_specific_pos.txt"
+    shell: "cat {input} | cut -f 1,2 > {output}"
+
+rule select_pop_specific_vars:
+    input: "vep_annotation/vep_egyptian_common.vcf.gz",
+           "vep_annotation/egyptian_pop_specific_pos.txt"
+    output: "vep_annotation/vep_egyptian_popspecific.vcf.gz"
+    params: log_base=lambda wildcards, output: output[0][:-7]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--positions {input[1]} " + \
+                    "--recode-INFO-all " + \
+                    "--recode " + \
+                    "--out {params.log_base} " + \
+                    "--stdout | bgzip > {output}"
+
+ANNO_FIELDS = ["CHROM","POS","ID","REF","ALT"] + \
+    ["Allele","Consequence","IMPACT","SYMBOL","Gene","Feature_type"] + \
+    ["Feature","BIOTYPE","EXON","INTRON","HGVSc","HGVSp","cDNA_position"] + \
+    ["CDS_position","Protein_position","Amino_acids","Codons"] + \
+    ["Existing_variation","DISTANCE","STRAND","FLAGS","VARIANT_CLASS"] + \
+    ["SYMBOL_SOURCE","HGNC_ID","CANONICAL","TSL","APPRIS","CCDS","ENSP"] + \
+    ["SWISSPROT","TREMBL","UNIPARC","REFSEQ_MATCH","SOURCE","GIVEN_REF"] + \
+    ["USED_REF","BAM_EDIT","GENE_PHENO","NEAREST","SIFT","PolyPhen"] + \
+    ["DOMAINS","HGVS_OFFSET"] + \
+    ["AF","AFR_AF","AMR_AF","EAS_AF","EUR_AF","SAS_AF","AA_AF","EA_AF"] + \
+    ["gnomAD_AF","gnomAD_AFR_AF","gnomAD_AMR_AF","gnomAD_ASJ_AF"] + \
+    ["gnomAD_EAS_AF","gnomAD_FIN_AF","gnomAD_NFE_AF","gnomAD_OTH_AF","gnomAD_SAS_AF"] + \
+    ["MAX_AF","MAX_AF_POPS"] + \
+    ["CLIN_SIG","SOMATIC","PHENO","PUBMED","MOTIF_NAME","MOTIF_POS"] + \
+    ["HIGH_INF_POS","MOTIF_SCORE_CHANGE","CADD_PHRED","CADD_RAW"]
+ANNO_HEADER = "\t".join(ANNO_FIELDS)  
+# Here, we select all annotation of the population specific SNPs (Egyptian-only
+# but also population-specific SNPs shared with other continental populations)
+# Every VEP annotation is provided in a seperate line
+rule annotated_pop_specific_vars:
+    input: "vep_annotation/vep_egyptian_popspecific.vcf.gz"
+    output: "vep_annotation/pop_specific_annotated.txt"
+    run:
+        with gzip.open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            f_out.write(ANNO_HEADER+"\n")
+            for line in f_in:
+                # Skip header
+                if line.decode()[0] == "#":
+                    continue
+                s = line.decode().split("\t")
+                vep_anno_string = s[7].split("=")[-1]
+                vep_annos = vep_anno_string.split(",")
+                for anno in vep_annos:
+                    f_out.write(("\t").join(s[:5]+anno.split("|"))+"\n")
 
 
 ################################################################################
