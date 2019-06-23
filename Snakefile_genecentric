@@ -1,6 +1,7 @@
 # Extracting various information within specified genes (i.e. gene-centric)
 
 from global_variables import *
+import gzip
 
 # These are some genes of interest (ABCC7=CFTR, HD=HDDC3?, Factor V=F5)
 GENES = ["CFTR","HDDC3","DMD","BRCA1","BRCA2","TP53","EGFR","APP","PSEN1","F5", \
@@ -10,6 +11,7 @@ GENES = ["CFTR","HDDC3","DMD","BRCA1","BRCA2","TP53","EGFR","APP","PSEN1","F5", 
 
 rule gc_all:
     input: expand("gene_centric/{gene}/EGYPTREF.{gene}.pb.bam", gene=GENES),
+           expand("map_illumina_pe/EGYPTREF_pe.bam", gene=GENES),
            expand("gene_centric/{gene}/EGYPTREF.{gene}.{lib}_10x.bam", \
                   lib=[x.split("_")[0] for x in ILLUMINA_10X_LIBS], gene=GENES),
            expand("gene_centric/{gene}/EGYPTREF.{gene}.phased10x.bam", gene=GENES),
@@ -20,7 +22,10 @@ rule gc_all:
            expand("gene_centric/{gene}/{gene}_1000g.vcf.gz",gene=GENES),
            expand("gene_centric/{gene}/nucdiff_{aligntype}_{a1}_vs_{a2}/results/{a1}_vs_{a2}_stat.out", \
                   gene=GENES,aligntype=["align"],a1="GRCh38", \
-                  a2=["EGYPTREFMETAV2ADDED","EGYPTREFV2","EGYPTREFWTDBG2V3PILON","AK1","YORUBA"])
+                  a2=["EGYPTREFMETAV2ADDED","EGYPTREFV2","EGYPTREFWTDBG2V3PILON","AK1","YORUBA"]),
+           expand("gene_centric/{gene}/{gene}_{type}_annotated.txt", \
+                  gene=GENES, \
+                type=["egyptianvep","egyptiancommonvep","egyptianpopspecificvep"])
 
 ################################################################################
 ############# Extracting gene annotation information (gene-centric) ############
@@ -139,6 +144,21 @@ rule gc_get_mapped_pb_egyptref_reads:
     shell: "samtools view -b -L {input.bed} {input.bam} > {output[0]}; " + \
            "samtools index {output[0]} "
 
+rule gc_link_illumina_paired_end:
+    input: "/data/lied_egypt_genome/output_wgs/EGYPTREF/EGYPTREF.merged.mark_dups.base_recal.bam",
+           "/data/lied_egypt_genome/output_wgs/EGYPTREF/EGYPTREF.merged.mark_dups.base_recal.bam.bai"
+    output: "map_illumina_pe/EGYPTREF_pe.bam",
+            "map_illumina_pe/EGYPTREF_pe.bam.bai"
+    shell: "ln -s {input[0]} {output[0]}; ln -s {input[1]} {output[1]};"
+
+rule gc_get_get_pe_egyptref_reads:
+    input: bam="map_illumina_pe/EGYPTREF_pe.bam",
+           bed="gene_centric/{gene}/{gene}_with_chr.bed"
+    output: "gene_centric/{gene}/EGYPTREF.{gene}.illuminape.bam",
+            "gene_centric/{gene}/EGYPTREF.{gene}.illuminape.bam.bai",
+    shell: "samtools view -b -L {input.bed} {input.bam} > {output[0]}; " + \
+           "samtools index {output[0]} "
+
 rule gc_get_mapped_10x_egyptref_reads:
     input: bam="map_10x_GRCh38/{lib}.bam",
            bed="gene_centric/{gene}/{gene}.bed"
@@ -155,7 +175,7 @@ rule gc_get_phased_10x_egyptref_reads:
     shell: "samtools view -b -L {input.bed} {input.bam} > {output[0]}; " + \
            "samtools index {output[0]} "
 
-rule gc_sync_rnaseq:
+rule gc_link_rnaseq:
     input: "/data/lied_egypt_genome/lied_egypt_rnaseq/data/phaser_sources/SI2Aligned_twoPass.sortedByCoord.chr.out.bam"
     output: "map_rnaseq/EGYPTREF_rnaseq.bam"
     shell: "ln -s {input} {output}"
@@ -170,6 +190,7 @@ rule gc_get_mapped_rnaseq_egyptref_reads:
 
 rule gc_get_mapped_egyptref_reads_all:
     input: expand("gene_centric/{gene}/EGYPTREF.{gene}.pb.bam", gene=GENES),
+           expand("map_illumina_pe/EGYPTREF_pe.bam", gene=GENES),
            expand("gene_centric/{gene}/EGYPTREF.{gene}.{lib}_10x.bam", \
                   lib=[x.split("_")[0] for x in ILLUMINA_10X_LIBS], gene=GENES),
            expand("gene_centric/{gene}/EGYPTREF.{gene}.rnaseq.bam", gene=GENES),
@@ -243,15 +264,85 @@ rule gc_get_variants_all:
            expand("gene_centric/{gene}/{gene}_1000g.vcf.gz",gene=GENES)
 
 
-################################################################################
-################## Extracting Annovar annotations (gene-centric) ###############
-################################################################################
-
 
 ################################################################################
 ################## Extracting VEP annotations (gene-centric) ###################
 ################################################################################
 
+rule gc_get_vep_variants:
+    input: vcf = "vep_annotation/vep.vcf.gz",
+           bed="gene_centric/{gene}/{gene}_with_chr.bed"
+    output: "gene_centric/{gene}/{gene}_egyptianvep.vcf.gz"
+    shell: "vcftools --gzvcf {input.vcf} " + \
+                    "--bed {input.bed} " + \
+                    "--recode " + \
+                    "--recode-INFO-all " + \
+                    "--stdout " + \
+                    "| bgzip > {output}"
+
+rule gc_get_vep_common_variants:
+    input: vcf = "vep_annotation/vep_egyptian_common.vcf.gz",
+           bed="gene_centric/{gene}/{gene}_with_chr.bed"
+    output: "gene_centric/{gene}/{gene}_egyptiancommonvep.vcf.gz"
+    shell: "vcftools --gzvcf {input.vcf} " + \
+                    "--bed {input.bed} " + \
+                    "--recode " + \
+                    "--recode-INFO-all " + \
+                    "--stdout " + \
+                    "| bgzip > {output}"
+
+rule gc_get_vep_pop_specific_variants:
+    input: vcf = "vep_annotation/vep_egyptian_popspecific.vcf.gz",
+           bed="gene_centric/{gene}/{gene}_with_chr.bed"
+    output: "gene_centric/{gene}/{gene}_egyptianpopspecificvep.vcf.gz"
+    shell: "vcftools --gzvcf {input.vcf} " + \
+                    "--bed {input.bed} " + \
+                    "--recode " + \
+                    "--recode-INFO-all " + \
+                    "--stdout " + \
+                    "| bgzip > {output}"
+
+ANNO_FIELDS = ["CHROM","POS","ID","REF","ALT"] + \
+    ["Allele","Consequence","IMPACT","SYMBOL","Gene","Feature_type"] + \
+    ["Feature","BIOTYPE","EXON","INTRON","HGVSc","HGVSp","cDNA_position"] + \
+    ["CDS_position","Protein_position","Amino_acids","Codons"] + \
+    ["Existing_variation","DISTANCE","STRAND","FLAGS","VARIANT_CLASS"] + \
+    ["SYMBOL_SOURCE","HGNC_ID","CANONICAL","TSL","APPRIS","CCDS","ENSP"] + \
+    ["SWISSPROT","TREMBL","UNIPARC","REFSEQ_MATCH","SOURCE","GIVEN_REF"] + \
+    ["USED_REF","BAM_EDIT","GENE_PHENO","NEAREST","SIFT","PolyPhen"] + \
+    ["DOMAINS","HGVS_OFFSET"] + \
+    ["AF","AFR_AF","AMR_AF","EAS_AF","EUR_AF","SAS_AF","AA_AF","EA_AF"] + \
+    ["gnomAD_AF","gnomAD_AFR_AF","gnomAD_AMR_AF","gnomAD_ASJ_AF"] + \
+    ["gnomAD_EAS_AF","gnomAD_FIN_AF","gnomAD_NFE_AF","gnomAD_OTH_AF","gnomAD_SAS_AF"] + \
+    ["MAX_AF","MAX_AF_POPS"] + \
+    ["CLIN_SIG","SOMATIC","PHENO","PUBMED","MOTIF_NAME","MOTIF_POS"] + \
+    ["HIGH_INF_POS","MOTIF_SCORE_CHANGE","CADD_PHRED","CADD_RAW"]
+ANNO_HEADER = "\t".join(ANNO_FIELDS)  
+# Here, we select all annotation of the Egyptian (i) all (ii) common, and (iii) 
+# population specific SNPs (Egyptian-only but also population-specific SNPs 
+# shared with other continental populations)
+# Every VEP annotation is provided in a separate line
+rule gc_annotated_pop_specific_vars:
+    input: "gene_centric/{gene}/{gene}_{type}.vcf.gz"
+    output: "gene_centric/{gene}/{gene}_{type}_annotated.txt"
+    run:
+        with gzip.open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            f_out.write(ANNO_HEADER+"\n")
+            for line in f_in:
+                # Skip header
+                if line.decode()[0] == "#":
+                    continue
+                s = line.decode().split("\t")
+                vep_anno_string = s[7].split("=")[-1]
+                vep_annos = vep_anno_string.split(",")
+                for anno in vep_annos:
+                    f_out.write(("\t").join(s[:5]+anno.split("|"))+"\n")
+
+rule gc_get_annotation_all:
+    input: expand("gene_centric/{gene}/{gene}_{type}_annotated.txt", \
+                   gene=GENES, \
+                   type=["egyptianvep","egyptiancommonvep","egyptianpopspecificvep"])
+            
 
 ################################################################################
 ############# Extracting assembly alignment information (gene-centric) #########
