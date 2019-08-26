@@ -6,7 +6,7 @@ import gzip
 # These are some genes of interest (ABCC7=CFTR, HD=HDDC3?, Factor V=F5)
 GENES = ["CFTR","HDDC3","DMD","BRCA1","BRCA2","TP53","EGFR","APP","PSEN1","F5", \
          "CARD11","LAMA4","MRC1","USH2A","PRAMEF17","C1QTNF12","CFAP74","MMEL1", \
-         "TTC34","GUCY1A1"]
+         "TTC34","GUCY1A1","CCR5","HBB"]
 #GENES = ["BRCA2"]
 
 rule gc_all:
@@ -72,7 +72,9 @@ WINDOW = {
     "CFAP74": [100000,100000],
     "MMEL1": [100000,100000],
     "TTC34": [100000,100000],
-    "GUCY1A1": [100000,100000]
+    "GUCY1A1": [100000,100000],
+    "CCR5": [100000,100000],
+    "HBB": [100000,100000]
 }
 rule gc_get_start_end_position:
     input: "gene_centric/{gene}/{gene}.gtf"

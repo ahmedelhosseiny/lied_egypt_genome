@@ -1,0 +1,123 @@
+# kate: syntax python;
+
+import gzip
+import os.path
+from decimal import Decimal
+import math
+
+
+
+########### Preprocessing GWAS catalog data ###########
+
+# Get the GWAS catalog
+rule get_gwas_catalog:
+    output: "gwas/results/alternative"
+    shell: "wget --directory-prefix=gwas/results https://www.ebi.ac.uk/gwas/api/search/downloads/alternative 2> /dev/null"
+
+# Get the GWAS catalog
+rule get_gwas_catalog_ancestry:
+    output: "gwas/results/ancestry"
+    shell: "wget --directory-prefix=gwas/results https://www.ebi.ac.uk/gwas/api/search/downloads/ancestry 2> /dev/null"
+
+rule list_diseases:
+    input: "gwas/results/alternative"
+    output: "gwas/results/custom_disease_ids.txt"
+    run:
+        disease_ids = {}
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                # Write custom header
+                if line[:4] == "DATE":
+                    f_out.write("MAPPED_TRAIT\tMAPPED_TRAIT_URI\tCUSTOM_ID\n")
+                    continue
+                s = line.split("\t")
+                new_disease_id = "-".join([x.split("/")[-1] for x in s[35].split(",")])
+                if not new_disease_id in disease_ids:
+                    f_out.write("\t".join([s[34],s[35],new_disease_id])+"\n")
+                    disease_ids[new_disease_id] = True
+
+GWAS_CATALOG_DISEASES = []
+if os.path.exists("gwas/results/custom_disease_ids.txt"):
+    with open("gwas/results/custom_disease_ids.txt","r") as f_in:
+        for line in f_in:
+            # Skip header
+            if line[:6] == "MAPPED" or line == "\t\t\n":
+                continue
+            GWAS_CATALOG_DISEASES.append(line.strip("\n").split("\t")[-1])
+#    print(GWAS_CATALOG_DISEASES)
+
+# Use the GWAS catalog data and make lists of variants for every disease / 
+# phenotype using the ontology IDs provided in column MAPPED_TRAIT_URI as file 
+# name
+rule make_disease_specific_gwas_lists:
+    input: "gwas/results/alternative"
+    output: expand("gwas/results/hg38_gwas_{disease}_catalog.tab", disease=GWAS_CATALOG_DISEASES)
+    run:
+        i = 0
+        for filename in output:
+            with open(input[0],"r") as f_in, open(filename,"w") as f_out:
+                for line in f_in:
+                    if line[:4] == "DATE":
+                        f_out.write(line)
+                        continue
+                    s = line.split("\t")
+                    disease_id = "-".join([x.split("/")[-1] for x in s[35].split(",")])
+                    if disease_id == GWAS_CATALOG_DISEASES[i]:
+                        f_out.write(line)                        
+                i += 1 
+                  
+
+########### Matching Egyptian common variants and GWAS data ###########
+
+# Extract those Egyptian population-specific SNPs that are within 100kb of a SNP 
+# listed in the GWAS catalog
+rule egyptian_popspecific_in_proximity:
+    input: "gwas/results/hg38_gwas_{disease}_catalog.tab",
+           "vep_annotation/vep_egyptian_popspecific.vcf.gz"
+    output: "gwas/results_{distance}/hg38_gwas_{disease}_{distance}_matched.txt"
+    run:
+        # Get the distance; SNPs within distance of the GWAS SNP are matched
+        dist = int(wildcards.distance)
+        # Read in positions of Egyptian common SNPs
+        vcf = {}
+        with gzip.open(input[1], 'rb') as f_vcf:
+            for line in f_vcf:
+                decoded_line = line.decode()
+                if decoded_line[0] == '#':
+                    header_vcf = decoded_line[1:]
+                    continue
+                s = decoded_line.split("\t")
+                chrom = s[0]
+                if chrom[:3] == "chr":
+                    chrom = chrom[3:]
+                pos = s[1]
+                if chrom in vcf:
+                    vcf[chrom].append([chrom,int(pos),decoded_line])
+                else:
+                    vcf[chrom] = [[chrom,int(pos),decoded_line]]
+        # Go over the GWAS catalog lines associations for this disease
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                # Skip header
+                if line[:4] == "DATE":
+                    f_out.write(line.strip("\n")+"\t"+header_vcf)
+                    continue
+                s = line.split("\t")
+                chrom = s[11]
+                # Skip GWAS catalog associations without position specified
+                if s[12] == "" or " x " in s[12] or ";" in s[12]:
+                    continue
+                pos = int(s[12])
+                for variant in vcf[chrom]:
+                    if pos-dist <= variant[1] <= pos+dist:
+                        f_out.write(line.strip("\n")+"\t"+variant[2]) 
+
+rule egyptian_popspecific_in_proximity_all:
+    input: expand("gwas/results_{distance}/hg38_gwas_{disease}_{distance}_matched.txt", \
+                  disease=GWAS_CATALOG_DISEASES, \
+                  distance=["0","10","100","1000","10000","100000"])
+        
+
+rule generate_paper_numbers:
+    input: "gwas/results_table/number_of_index_snps.txt"
+
