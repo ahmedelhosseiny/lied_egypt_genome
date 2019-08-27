@@ -65,7 +65,91 @@ rule make_disease_specific_gwas_lists:
                     if disease_id == GWAS_CATALOG_DISEASES[i]:
                         f_out.write(line)                        
                 i += 1 
-                  
+
+
+# Make a list of disease-specific gwas hits only for studies using individuals
+# of European ancestry
+rule filter_disease_specific_gwas_lists_for_european:
+    input: "gwas/results/hg38_gwas_{disease}_catalog.tab",
+           "gwas/results/ancestry"
+    output: "gwas/results/hg38_gwas_{disease}_european.tab"
+    run:
+        # Get study IDs of studies with only European individuals
+        study_accessions = {}
+        with open(input[1],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                if line[:5] == "STUDY":
+                    f_out.write(line)
+                    continue
+                s = line.split("\t")
+                # We use the column "BROAD ANCESTRAL CATEGORY", and of this only
+                # European only
+                ancestry = s[8]
+                if ancestry == "European":
+                    study_accessions[s[0]] = True
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                if line[:4] == "DATE":
+                    f_out.write(line)
+                    continue
+                # get the study accession of this association              
+                study_accession = line.split("\t")[36]
+                if study_accession in study_accessions:
+                    f_out.write(line)
+
+rule filter_disease_specific_gwas_lists_for_european_all:
+    input: expand("gwas/results/hg38_gwas_{disease}_european.tab", disease=GWAS_CATALOG_DISEASES)
+
+POPULATIONS_EUR = ["CEU","FIN","GBR","IBS","TSI"]
+rule extract_european_1000g:
+    input: "1000_genomes/integrated_call_samples_v2.20130502.ALL.ped"
+    output: "gwas/ld/keep_indiv.txt"
+    run:
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                s = line.split("\t")
+                if s[6] in POPULATIONS_EUR and s[13] == "1":
+                    f_out.write(s[1]+"\n")
+
+# Selecting from the VCF files those individuals that are to be used
+# Keeping only variants with at last 5% MAF
+# Keeping only variants not violating Hardy-Weinberg-Equilibrium
+# Keeping only bi-allelic variants (min-allele = max-allele = 2)
+rule select_european_1000g_individual_genotypes:
+    input: "1000_genomes/ALL.chr{chr}_GRCh38.genotypes.20170504.vcf.gz",
+           "gwas/ld/keep_indiv.txt"
+    output: "gwas/ld/EUR.chr{chr}_GRCh38.vcf.gz"
+    params: log_base=lambda wildcards, output: output[0][:-7]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--keep {input[1]} " + \
+                    "--recode-INFO-all " + \
+                    "--recode " + \
+                    "--out {params.log_base} " + \
+                    "--stdout | bgzip > {output[0]}"
+
+# Concatenate the vcf file from several chromosomes
+# --pad-missing: Write '.' in place of missing columns. Useful for joining chrY 
+# with the rest.
+rule concatenate_european_chr_vcfs:
+    input: expand("gwas/ld/EUR.chr{chr}_GRCh38.vcf.gz", \
+                   chr=[str(x) for x in range(1,23)])
+    output: "gwas/ld/EUR_GRCh38.vcf.gz"
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcf-concat --pad-missing {input} | bgzip > {output}"
+
+rule compute_ld_1000g:
+    input: "gwas/ld/EUR_GRCh38.vcf.gz",
+           "gwas/results/hg38_gwas_{disease}_european.rsids"
+    output: "gwas/ld/{disease}.ld"
+    shell: ""
+
+rule keep_replicated_loci:
+    input: "gwas/results/hg38_gwas_{disease}_european.tab"
+    output: "gwas/results/hg38_gwas_{disease}_europeanreplicated.tab"
+    run: 
+        pass
+
 
 ########### Matching Egyptian common variants and GWAS data ###########
 
