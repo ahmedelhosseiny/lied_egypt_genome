@@ -1,10 +1,16 @@
 # kate: syntax python;
+# Run rule list_diseases first!
 
 import gzip
 import os.path
 from decimal import Decimal
 import math
 
+
+rule all:
+    input: "gwas/results/num_diseases.txt", \
+           expand("gwas/results/num_{analysis}_per_disease.txt", analysis= \
+                 ["associations","europeanassociations","recurrentloci","loci"])
 
 
 ########### Preprocessing GWAS catalog data ###########
@@ -36,11 +42,16 @@ rule list_diseases:
                     f_out.write("\t".join([s[34],s[35],new_disease_id])+"\n")
                     disease_ids[new_disease_id] = True
 
+rule num_diseases:
+    input: "gwas/results/custom_disease_ids.txt"
+    output: "gwas/results/num_diseases.txt"
+    shell: "cat {input} | grep -v 'MAPPED_TRAIT' | wc -l > {output}"
+
 GWAS_CATALOG_DISEASES = []
 if os.path.exists("gwas/results/custom_disease_ids.txt"):
     with open("gwas/results/custom_disease_ids.txt","r") as f_in:
         for line in f_in:
-            # Skip header
+            # Skip header and skip lines without mapped trait
             if line[:6] == "MAPPED" or line == "\t\t\n":
                 continue
             GWAS_CATALOG_DISEASES.append(line.strip("\n").split("\t")[-1])
@@ -48,10 +59,10 @@ if os.path.exists("gwas/results/custom_disease_ids.txt"):
 
 # Use the GWAS catalog data and make lists of variants for every disease / 
 # phenotype using the ontology IDs provided in column MAPPED_TRAIT_URI as file 
-# name
+# Watchout: there are 249 associations without mapped ID
 rule make_disease_specific_gwas_lists:
     input: "gwas/results/alternative"
-    output: expand("gwas/results/hg38_gwas_{disease}_catalog.tab", disease=GWAS_CATALOG_DISEASES)
+    output: expand("gwas/results/{disease}_catalog.tab", disease=GWAS_CATALOG_DISEASES)
     run:
         i = 0
         for filename in output:
@@ -66,13 +77,22 @@ rule make_disease_specific_gwas_lists:
                         f_out.write(line)                        
                 i += 1 
 
+rule num_associations_per_disease:
+    input: expand("gwas/results/{disease}_catalog.tab", disease=GWAS_CATALOG_DISEASES)
+    output: "gwas/results/num_associations_per_disease.txt"
+    run:
+        i = 0
+        for filename in input:
+            with open(input[i],"r") as f_in, open(output[0],"a") as f_out:
+                f_out.write(GWAS_CATALOG_DISEASES[i]+"\t"+str(len(f_in.readlines()))+"\n")
+            i += 1
 
 # Make a list of disease-specific gwas hits only for studies using individuals
 # of European ancestry
 rule filter_disease_specific_gwas_lists_for_european:
-    input: "gwas/results/hg38_gwas_{disease}_catalog.tab",
+    input: "gwas/results/{disease}_catalog.tab",
            "gwas/results/ancestry"
-    output: "gwas/results/hg38_gwas_{disease}_european.tab"
+    output: "gwas/results/{disease}_european.tab"
     run:
         # Get study IDs of studies with only European individuals
         study_accessions = {}
@@ -97,8 +117,69 @@ rule filter_disease_specific_gwas_lists_for_european:
                 if study_accession in study_accessions:
                     f_out.write(line)
 
+rule num_european_associations_per_disease:
+    input: expand("gwas/results/{disease}_european.tab", disease=GWAS_CATALOG_DISEASES)
+    output: "gwas/results/num_europeanassociations_per_disease.txt"
+    run:
+        i = 0
+        for filename in input:
+            with open(input[i],"r") as f_in, open(output[0],"a") as f_out:
+                f_out.write(GWAS_CATALOG_DISEASES[i]+"\t"+str(len(f_in.readlines()))+"\n")
+            i += 1
+
 rule filter_disease_specific_gwas_lists_for_european_all:
-    input: expand("gwas/results/hg38_gwas_{disease}_european.tab", disease=GWAS_CATALOG_DISEASES)
+    input: expand("gwas/results/{disease}_european.tab", disease=GWAS_CATALOG_DISEASES)
+
+# Filter disease-specific associations such that only associations within 1 MB
+# of another association are kept
+rule filter_disease_specific_gwas_lists_for_recurrent_loci:
+    input: "gwas/results/{disease}_european.tab"
+    output: "gwas/results/{disease}_recurrentloci.tab"
+    run:
+        # Record all positions for this disease
+        positions = []
+        with open(input[0],"r") as f_in:
+            for line in f_in:
+                if line[:4] == "DATE":
+                    continue
+                s = line.split("\t")
+                chrom = s[11]
+                # Disregard assoc. without one unique position specified
+                if s[12] == "" or "x" in s[12] or ";" in s[12]:
+                    continue
+                pos = int(s[12])
+                positions.append([chrom,pos,line])
+        # Go again over the associations
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                if line[:4] == "DATE":
+                    f_out.write(line)
+                    continue
+                s = line.split("\t")
+                chrom = s[11]
+                # Disregard assoc. without position specified
+                if s[12] == "" or "x" in s[12] or ";" in s[12]:
+                    continue
+                pos = int(s[12])
+                for prev_chrom,prev_pos,prev_line in positions:
+                    if prev_line == line or not chrom == prev_chrom:
+                        continue
+                    if abs(pos-prev_pos)<1000000:
+                        f_out.write(line)
+                        break
+
+rule num_recurrentloci_per_disease:
+    input: expand("gwas/results/{disease}_recurrentloci.tab", disease=GWAS_CATALOG_DISEASES)
+    output: "gwas/results/num_recurrentloci_per_disease.txt"
+    run:
+        i = 0
+        for filename in input:
+            with open(input[i],"r") as f_in, open(output[0],"a") as f_out:
+                f_out.write(GWAS_CATALOG_DISEASES[i]+"\t"+str(len(f_in.readlines()))+"\n")
+            i += 1
+
+rule filter_disease_specific_gwas_lists_for_recurrent_loci_all:
+    input: expand("gwas/results/{disease}_recurrentloci.tab", disease=GWAS_CATALOG_DISEASES)
 
 POPULATIONS_EUR = ["CEU","FIN","GBR","IBS","TSI"]
 rule extract_european_1000g:
@@ -112,8 +193,6 @@ rule extract_european_1000g:
                     f_out.write(s[1]+"\n")
 
 # Selecting from the VCF files those individuals that are to be used
-# Keeping only variants with at last 5% MAF
-# Keeping only variants not violating Hardy-Weinberg-Equilibrium
 # Keeping only bi-allelic variants (min-allele = max-allele = 2)
 rule select_european_1000g_individual_genotypes:
     input: "1000_genomes/ALL.chr{chr}_GRCh38.genotypes.20170504.vcf.gz",
@@ -138,18 +217,140 @@ rule concatenate_european_chr_vcfs:
     conda: "envs/genotype_pcs.yaml"
     shell: "vcf-concat --pad-missing {input} | bgzip > {output}"
 
+rule filter_european_snps:
+    input: "gwas/ld/EUR_GRCh38.vcf.gz"
+    output: "gwas/ld/EUR_GRCh38_common.vcf.gz"
+    params: log_base=lambda wildcards, output: output[0][:-7]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--min-alleles 2 " + \
+                    "--max-alleles 2 " + \
+                    "--maf 0.05 " + \
+                    "--hwe 0.000001 " + \
+                    "--recode-INFO-all " + \
+                    "--recode " + \
+                    "--out {params.log_base} " + \
+                    "--stdout | bgzip > {output[0]}"
+
+# Extract the rsids from GWAS of the specific disease
+rule get_snp_ids:
+    input: "gwas/results/{disease}_recurrentloci.tab"
+    output: "gwas/ld/{disease}.rsids"
+    run:
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                if line[:4] == "DATE":
+                    continue
+                f_out.write(line.split("\t")[20].split("-")[0]+"\n")
+
+rule european_vcf_for_disease:
+    input: "gwas/ld/EUR_GRCh38_common.vcf.gz",
+           "gwas/ld/{disease}.rsids"
+    output: "gwas/ld/{disease}_EUR.vcf.gz"
+    params: log_base=lambda wildcards, output: output[0][:-7]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--snps {input[1]} " + \
+                    "--recode-INFO-all " + \
+                    "--recode " + \
+                    "--out {params.log_base} " + \
+                    "--stdout | bgzip > {output[0]}"
+
+# Compute the LD between any pair of SNPs
+# Output the LDs less than 0.8 
+# Compute only for SNPs less than 1MB apart from each other
 rule compute_ld_1000g:
-    input: "gwas/ld/EUR_GRCh38.vcf.gz",
-           "gwas/results/hg38_gwas_{disease}_european.rsids"
-    output: "gwas/ld/{disease}.ld"
-    shell: ""
+    input: "gwas/ld/{disease}_EUR.vcf.gz",
+    output: "gwas/ld/{disease}.geno.ld"
+    params: log_base=lambda wildcards, output: output[0][:-8]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--geno-r2 " + \
+                    "--ld-window-bp 1000000 " + \
+                    "--min-r2 0.8 " + \
+                    "--out {params.log_base} "
 
-rule keep_replicated_loci:
-    input: "gwas/results/hg38_gwas_{disease}_european.tab"
-    output: "gwas/results/hg38_gwas_{disease}_europeanreplicated.tab"
+# The idea is to keep one association per loci, where we define a locus as
+# a region of 1MB with a taq association (this means we miss independent
+# association signals that are closer than 1 MB from each other)
+# We automatically select the association based on the number of occurrences 
+# per rsid position plus this positions must be in LD>0.8 with at least one
+# other association
+rule keep_one_variant_per_locus:
+    input: "gwas/results/{disease}_recurrentloci.tab",
+           "gwas/ld/{disease}.geno.ld"
+    output: "gwas/results/{disease}_loci.tab"
     run: 
-        pass
+        # Read in the association positions with high ld >0.8
+        position_count = {}
+        position2rsid = {}
+        with open(input[1],"r") as f_in:
+            for line in f_in:
+                if line[:3] == "CHR":
+                    continue
+                s = line.split("\t")
+                chrom = s[0]
+                pos1 = s[1]
+                pos2 = s[2]
+                position_count["\t".join([chrom,pos1])] = 0
+                position_count["\t".join([chrom,pos2])] = 0
+        with open(input[0],"r") as f_in:
+            for line in f_in:
+                if line[:4] == "DATE":
+                    continue
+                s = line.split("\t")
+                chrom = s[11]
+                pos = s[12]
+                # Only positions occurring at least once in ld with another ass.
+                if "\t".join([chrom,pos]) in position_count:
+                    position_count["\t".join([chrom,pos])] += 1
+        sorted_pc = sorted(position_count.items(), key = lambda x: -1*x[1])
+        print(sorted_pc)
+        loci = [sorted_pc[0][0].split("\t")]
+        # Go over the positions in descending order of their occurrences
+        for chr_pos,occ in sorted_pc:
+            chrom,pos = chr_pos.split("\t")
+            locus_new = True
+            for loc_chrom,loc_pos in loci:
+                if not chrom == loc_chrom:
+                    continue
+                if (int(pos)-int(loc_pos)) <= 1000000:
+                    locus_new = False
+            if locus_new:
+                loci.append([chrom,pos])
+        print(loci)
+        # Go over the input gwas ass. file and write only those ass. to output
+        # which are uniquely defining a locus
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                if line[:4] == "DATE":
+                    f_out.write(line)
+                    continue
+                s = line.split("\t")
+                chrom = s[11]
+                pos = s[12]
+                if [chrom,pos] in loci:
+                    f_out.write(line)
 
+rule num_european_loci_per_disease:
+    input: expand("gwas/results/{disease}_loci.tab", disease=GWAS_CATALOG_DISEASES)
+    output: "gwas/results/num_loci_per_disease.txt"
+    run:
+        i = 0
+        for filename in input:
+            with open(input[i],"r") as f_in, open(output[0],"a") as f_out:
+                f_out.write(GWAS_CATALOG_DISEASES[i]+"\t"+str(len(f_in.readlines()))+"\n")
+            i += 1
+
+# Make a long list for the taq snps obtained like this combining all diseases
+rule taq_snp_list:
+    input: expand("gwas/results/{disease}_loci.tab", disease=GWAS_CATALOG_DISEASES)    
+    output: "gwas/taq_snps/taq_snps.txt"
+    shell: "cat {input} | grep -v 'SNPS' | cut -f 12,13,22 | sort | uniq > {output}"
+
+# How much does allele frequency differ for the taq snps
+                
+                
 
 ########### Matching Egyptian common variants and GWAS data ###########
 
