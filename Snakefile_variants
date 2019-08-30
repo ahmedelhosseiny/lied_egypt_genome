@@ -953,6 +953,10 @@ rule select_population_specific_variants:
                 afs_1000g = [float(x) for x in afs_1000g]
                 # If the overall allele frequency is not given, approximate it
                 # by computing an average allele frequency over the 5 pops
+                # It seems this happens for SNPs that are multi-allelic 
+                # according to Ensembl; if so, the population frequencies
+                # are correctly annotated for the respective allele and 
+                # approximating with them seems OK
                 if af == "":
                     af = 0.2*sum([float(x) for x in afs_1000g])
                 else:

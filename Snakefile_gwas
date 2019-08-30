@@ -84,7 +84,7 @@ rule num_associations_per_disease:
         i = 0
         for filename in input:
             with open(input[i],"r") as f_in, open(output[0],"a") as f_out:
-                f_out.write(GWAS_CATALOG_DISEASES[i]+"\t"+str(len(f_in.readlines()))+"\n")
+                f_out.write(GWAS_CATALOG_DISEASES[i]+"\t"+str(len(f_in.readlines())-1)+"\n")
             i += 1
 
 # Make a list of disease-specific gwas hits only for studies using individuals
@@ -124,7 +124,7 @@ rule num_european_associations_per_disease:
         i = 0
         for filename in input:
             with open(input[i],"r") as f_in, open(output[0],"a") as f_out:
-                f_out.write(GWAS_CATALOG_DISEASES[i]+"\t"+str(len(f_in.readlines()))+"\n")
+                f_out.write(GWAS_CATALOG_DISEASES[i]+"\t"+str(len(f_in.readlines())-1)+"\n")
             i += 1
 
 rule filter_disease_specific_gwas_lists_for_european_all:
@@ -175,7 +175,7 @@ rule num_recurrentloci_per_disease:
         i = 0
         for filename in input:
             with open(input[i],"r") as f_in, open(output[0],"a") as f_out:
-                f_out.write(GWAS_CATALOG_DISEASES[i]+"\t"+str(len(f_in.readlines()))+"\n")
+                f_out.write(GWAS_CATALOG_DISEASES[i]+"\t"+str(len(f_in.readlines())-1)+"\n")
             i += 1
 
 rule filter_disease_specific_gwas_lists_for_recurrent_loci_all:
@@ -256,6 +256,37 @@ rule european_vcf_for_disease:
                     "--out {params.log_base} " + \
                     "--stdout | bgzip > {output[0]}"
 
+GWAS_CATALOG_DISEASES_LOCI = []
+if os.path.exists("gwas/results/num_recurrentloci_per_disease.txt"):
+    with open("gwas/results/num_recurrentloci_per_disease.txt","r") as f_in:
+        for line in f_in:
+            s = line.strip("\n").split("\t")
+            if not s[1] == "0":
+                GWAS_CATALOG_DISEASES_LOCI.append(s[0])
+
+rule num_recurrentloci_in_vcf_per_disease:
+    input: expand("gwas/ld/{disease}_EUR.vcf.gz", disease=GWAS_CATALOG_DISEASES_LOCI)
+    output: "gwas/results/num_recurrentlocivcf_per_disease.txt"
+    run:
+        i = 0
+        for filename in input:
+            num_ass = 0
+            with gzip.open(input[i],"r") as f_in, open(output[0],"a") as f_out:
+                for line in f_in:
+                    if line.decode()[0] == "#":
+                        continue
+                    num_ass += 1
+                f_out.write(GWAS_CATALOG_DISEASES_LOCI[i]+"\t"+str(len(f_in.readlines())-1)+"\n")
+            i += 1
+
+GWAS_CATALOG_DISEASES_LOCI_VCF = []
+if os.path.exists("gwas/results/num_recurrentlocivcf_per_disease.txt"):
+    with open("gwas/results/num_recurrentlocivcf_per_disease.txt","r") as f_in:
+        for line in f_in:
+            s = line.strip("\n").split("\t")
+            if not s[1] == "0":
+                GWAS_CATALOG_DISEASES_LOCI_VCF.append(s[0])
+
 # Compute the LD between any pair of SNPs
 # Output the LDs less than 0.8 
 # Compute only for SNPs less than 1MB apart from each other
@@ -333,18 +364,18 @@ rule keep_one_variant_per_locus:
                     f_out.write(line)
 
 rule num_european_loci_per_disease:
-    input: expand("gwas/results/{disease}_loci.tab", disease=GWAS_CATALOG_DISEASES)
+    input: expand("gwas/results/{disease}_loci.tab", disease=GWAS_CATALOG_DISEASES_LOCI)
     output: "gwas/results/num_loci_per_disease.txt"
     run:
         i = 0
         for filename in input:
             with open(input[i],"r") as f_in, open(output[0],"a") as f_out:
-                f_out.write(GWAS_CATALOG_DISEASES[i]+"\t"+str(len(f_in.readlines()))+"\n")
+                f_out.write(GWAS_CATALOG_DISEASES_LOCI[i]+"\t"+str(len(f_in.readlines())-1)+"\n")
             i += 1
 
 # Make a long list for the taq snps obtained like this combining all diseases
 rule taq_snp_list:
-    input: expand("gwas/results/{disease}_loci.tab", disease=GWAS_CATALOG_DISEASES)    
+    input: expand("gwas/results/{disease}_loci.tab", disease=GWAS_CATALOG_DISEASES_LOCI)    
     output: "gwas/taq_snps/taq_snps.txt"
     shell: "cat {input} | grep -v 'SNPS' | cut -f 12,13,22 | sort | uniq > {output}"
 
