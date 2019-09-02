@@ -276,7 +276,7 @@ rule num_recurrentloci_in_vcf_per_disease:
                     if line.decode()[0] == "#":
                         continue
                     num_ass += 1
-                f_out.write(GWAS_CATALOG_DISEASES_LOCI[i]+"\t"+str(len(f_in.readlines())-1)+"\n")
+                f_out.write(GWAS_CATALOG_DISEASES_LOCI[i]+"\t"+str(num_ass)+"\n")
             i += 1
 
 GWAS_CATALOG_DISEASES_LOCI_VCF = []
@@ -284,7 +284,7 @@ if os.path.exists("gwas/results/num_recurrentlocivcf_per_disease.txt"):
     with open("gwas/results/num_recurrentlocivcf_per_disease.txt","r") as f_in:
         for line in f_in:
             s = line.strip("\n").split("\t")
-            if not s[1] == "0":
+            if not s[1] in ["0","1"]:
                 GWAS_CATALOG_DISEASES_LOCI_VCF.append(s[0])
 
 # Compute the LD between any pair of SNPs
@@ -300,6 +300,31 @@ rule compute_ld_1000g:
                     "--ld-window-bp 1000000 " + \
                     "--min-r2 0.8 " + \
                     "--out {params.log_base} "
+
+rule num_recurrentloci_in_ld_per_disease:
+    input: expand("gwas/ld/{disease}.geno.ld", disease=GWAS_CATALOG_DISEASES_LOCI_VCF)
+    output: "gwas/results/num_recurrentlocild_per_disease.txt"
+    run:
+        i = 0
+        for filename in input:
+            num_ass = 0
+            with open(input[i],"r") as f_in, open(output[0],"a") as f_out:
+                for line in f_in:
+                    if line[0] == "CHR":
+                        continue
+                    num_ass += 1
+                f_out.write(GWAS_CATALOG_DISEASES_LOCI_VCF[i]+"\t"+str(num_ass)+"\n")
+            i += 1
+
+GWAS_CATALOG_DISEASES_LOCI_LD = []
+if os.path.exists("gwas/results/num_recurrentlocild_per_disease.txt"):
+    with open("gwas/results/num_recurrentlocild_per_disease.txt","r") as f_in:
+        for line in f_in:
+            s = line.strip("\n").split("\t")
+            # There must be more than the header line, i.e. at least one pair
+            # of SNPs to continue
+            if not s[1] == "1":
+                GWAS_CATALOG_DISEASES_LOCI_LD.append(s[0])
 
 # The idea is to keep one association per loci, where we define a locus as
 # a region of 1MB with a taq association (this means we miss independent
@@ -364,24 +389,128 @@ rule keep_one_variant_per_locus:
                     f_out.write(line)
 
 rule num_european_loci_per_disease:
-    input: expand("gwas/results/{disease}_loci.tab", disease=GWAS_CATALOG_DISEASES_LOCI)
+    input: expand("gwas/results/{disease}_loci.tab", disease=GWAS_CATALOG_DISEASES_LOCI_LD)
     output: "gwas/results/num_loci_per_disease.txt"
     run:
         i = 0
         for filename in input:
             with open(input[i],"r") as f_in, open(output[0],"a") as f_out:
-                f_out.write(GWAS_CATALOG_DISEASES_LOCI[i]+"\t"+str(len(f_in.readlines())-1)+"\n")
+                f_out.write(GWAS_CATALOG_DISEASES_LOCI_LD[i]+"\t"+str(len(f_in.readlines())-1)+"\n")
             i += 1
 
 # Make a long list for the taq snps obtained like this combining all diseases
 rule taq_snp_list:
-    input: expand("gwas/results/{disease}_loci.tab", disease=GWAS_CATALOG_DISEASES_LOCI)    
+    input: expand("gwas/results/{disease}_loci.tab", disease=GWAS_CATALOG_DISEASES_LOCI_LD)    
     output: "gwas/taq_snps/taq_snps.txt"
     shell: "cat {input} | grep -v 'SNPS' | cut -f 12,13,22 | sort | uniq > {output}"
 
+rule taq_rsids:
+    input: "gwas/taq_snps/taq_snps.txt"
+    output: "gwas/taq_snps/taq_snps.rsids"
+    shell: "cat {input} | cut -f 3 > {output}"
+
 # How much does allele frequency differ for the taq snps
-                
-                
+# For this, first get allele frequency in European data 
+rule select_taq_european:
+    input: "gwas/ld/EUR_GRCh38_common.vcf.gz", "gwas/taq_snps/taq_snps.rsids"
+    output: "gwas/taq_snps/taq_snps_EUR.vcf.gz"
+    params: log_base=lambda wildcards, output: output[0][:-7]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--snps {input[1]} " + \
+                    "--recode-INFO-all " + \
+                    "--recode " + \
+                    "--out {params.log_base} " + \
+                    "--stdout | bgzip > {output[0]}"
+
+rule af_taq_european:
+    input: "gwas/taq_snps/taq_snps_EUR.vcf.gz"
+    output: "gwas/taq_snps/taq_snps_EUR.frq"
+    params: log_base=lambda wildcards, output: output[0][:-4]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--freq " + \
+                    "--out {params.log_base} "
+
+rule select_taq_egyptian:
+    input: "vep_annotation/vep.vcf.gz", \
+           "gwas/taq_snps/taq_snps.rsids"
+    output: "gwas/taq_snps/taq_snps_EGP.vcf.gz"
+    params: log_base=lambda wildcards, output: output[0][:-7]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--snps {input[1]} " + \
+                    "--recode-INFO-all " + \
+                    "--recode " + \
+                    "--out {params.log_base} " + \
+                    "--stdout | bgzip > {output[0]}"
+
+rule af_taq_egyptian:
+    input: "gwas/taq_snps/taq_snps_EGP.vcf.gz"
+    output: "gwas/taq_snps/taq_snps_EGP.frq"
+    params: log_base=lambda wildcards, output: output[0][:-4]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--freq " + \
+                    "--out {params.log_base} "
+
+rule compare_taq_af:
+    input: "gwas/taq_snps/taq_snps_EUR.frq", "gwas/taq_snps/taq_snps_EGP.frq"
+    output: "gwas/taq_snps/taq_snps_af.txt", "gwas/taq_snps/taq_snps_af_multiallelic.txt" 
+    run:
+        header = "\t".join(["CHROM","POS","REF","ALT","EUR_N_CHR","EUR_ALT_AF","EGP_N_CHR","EGP_ALT_AF"])
+        header_multi = "\t".join(["CHROM","POS","REF","ALT","EUR_N_CHR","EUR_ALT_AF"])
+        eur_af = {}
+        with open(input[0],"r") as f_in:
+            for line in f_in:
+                # Skip header
+                if line[:5] == "CHROM":
+                    continue
+                s = line.strip("\n").split("\t")
+                chrom = s[0]
+                pos = s[1]
+                # Make sure all taq SNPs are in fact bi-allelic
+                assert(s[2] == "2")
+                ref,ref_af = s[4].split(":")
+                alt,alt_af = s[5].split(":")
+                # Make sure frequencies add up to 1
+                assert(0.9999<=float(ref_af)+float(alt_af)<=1.0001)
+                nchrom = s[3]
+                loc = "\t".join([chrom,pos,ref,alt])
+                eur_af[loc] = [nchrom,alt_af]
+        with open(input[1],"r") as f_in, open(output[0],"w") as f_out, \
+             open(output[1],"w") as f_out_multi:
+            for line in f_in:
+                # Skip header; write new header
+                if line[:5] == "CHROM":
+                    f_out.write(header+"\n")
+                    f_out_multi.write(header_multi+"\n")
+                    continue
+                s = line.strip("\n").split("\t")
+                chrom = s[0]
+                if chrom[:3] == "chr":
+                    chrom = chrom[3:]
+                pos = s[1]
+                # Make sure all taq SNPs are in fact bi-allelic
+                assert(s[2] == "2")
+                ref,ref_af = s[4].split(":")
+                alt,alt_af = s[5].split(":")
+                # Make sure frequencies add up to 1
+                assert(0.9999<=float(ref_af)+float(alt_af)<=1.0001)
+                nchrom = s[3]
+                loc = "\t".join([chrom,pos,ref,alt])
+                egp_af = [nchrom,alt_af]
+                if not loc in eur_af:
+                    f_out_multi.write(loc+"\t"+"\t".join(egp_af)+"\n")
+                else:
+                    f_out.write(loc+"\t"+"\t".join(eur_af[loc])+"\t"+"\t".join(egp_af)+"\n")
+
+rule plot_taq_af_diff:
+    input: "gwas/taq_snps/taq_snps_af.txt"
+    output: "gwas/taq_snps/taq_af_diff.pdf"
+    script: "scripts/plot_taq_af_diff.R"
+        
+            
 
 ########### Matching Egyptian common variants and GWAS data ###########
 

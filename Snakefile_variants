@@ -1050,6 +1050,37 @@ rule annotated_pop_specific_vars:
 
 
 ################################################################################
+### This is an alternative way of selecting population-specific variants #######
+################################################################################
+
+rule symlink_var_step2_file:
+    input: "/data/lied_egypt_genome/output_wgs/vep/vars.step2.vcf.gz"
+    output: "vep_annotation/egyptians_step2.vcf.gz"
+    shell: "ln -s {input} {output}"
+
+# Select common variants in the Egyptian cohort for further consideration. 
+# These should be 
+# * no missing genotypes (--max-missing)
+# * have minor allel frequency of 5% (--maf)
+# These are the variants for further characterization concerning population
+# frequencies
+rule extract_egyptian_common_vars_w_indels_and_missing_gt:
+    input: "vep_annotation/egyptians_step2.vcf.gz"
+    output: "vep_annotation/vep_egyptian_common_withindelsandmissinggt.vcf.gz"
+    params: log_base=lambda wildcards, output: output[0][:-7]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input} " + \
+                    "--max-missing-count 20 " + \
+                    "--maf 0.05 " + \
+                    "--recode-INFO-all " + \
+                    "--recode " + \
+                    "--out {params.log_base} " + \
+                    "--stdout | bgzip > {output}"
+
+
+
+
+################################################################################
 ####### Performing preprocessing and statistics for SVs called by Axel #########
 ################################################################################
 
