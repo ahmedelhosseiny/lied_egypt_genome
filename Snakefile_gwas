@@ -327,7 +327,7 @@ if os.path.exists("gwas/results/num_recurrentlocild_per_disease.txt"):
                 GWAS_CATALOG_DISEASES_LOCI_LD.append(s[0])
 
 # The idea is to keep one association per loci, where we define a locus as
-# a region of 1MB with a taq association (this means we miss independent
+# a region of 1MB with a tag association (this means we miss independent
 # association signals that are closer than 1 MB from each other)
 # We automatically select the association based on the number of occurrences 
 # per rsid position plus this positions must be in LD>0.8 with at least one
@@ -398,22 +398,22 @@ rule num_european_loci_per_disease:
                 f_out.write(GWAS_CATALOG_DISEASES_LOCI_LD[i]+"\t"+str(len(f_in.readlines())-1)+"\n")
             i += 1
 
-# Make a long list for the taq snps obtained like this combining all diseases
-rule taq_snp_list:
+# Make a long list for the tag snps obtained like this combining all diseases
+rule tag_snp_list:
     input: expand("gwas/results/{disease}_loci.tab", disease=GWAS_CATALOG_DISEASES_LOCI_LD)    
-    output: "gwas/taq_snps/taq_snps.txt"
+    output: "gwas/tag_snps/tag_snps.txt"
     shell: "cat {input} | grep -v 'SNPS' | cut -f 12,13,22 | sort | uniq > {output}"
 
-rule taq_rsids:
-    input: "gwas/taq_snps/taq_snps.txt"
-    output: "gwas/taq_snps/taq_snps.rsids"
+rule tag_rsids:
+    input: "gwas/tag_snps/tag_snps.txt"
+    output: "gwas/tag_snps/tag_snps.rsids"
     shell: "cat {input} | cut -f 3 > {output}"
 
-# How much does allele frequency differ for the taq snps
+# How much does allele frequency differ for the tag snps
 # For this, first get allele frequency in European data 
-rule select_taq_european:
-    input: "gwas/ld/EUR_GRCh38_common.vcf.gz", "gwas/taq_snps/taq_snps.rsids"
-    output: "gwas/taq_snps/taq_snps_EUR.vcf.gz"
+rule select_tag_european:
+    input: "gwas/ld/EUR_GRCh38_common.vcf.gz", "gwas/tag_snps/tag_snps.rsids"
+    output: "gwas/tag_snps/tag_snps_EUR.vcf.gz"
     params: log_base=lambda wildcards, output: output[0][:-7]
     conda: "envs/genotype_pcs.yaml"
     shell: "vcftools --gzvcf {input[0]} " + \
@@ -423,19 +423,19 @@ rule select_taq_european:
                     "--out {params.log_base} " + \
                     "--stdout | bgzip > {output[0]}"
 
-rule af_taq_european:
-    input: "gwas/taq_snps/taq_snps_EUR.vcf.gz"
-    output: "gwas/taq_snps/taq_snps_EUR.frq"
+rule af_tag_european:
+    input: "gwas/tag_snps/tag_snps_EUR.vcf.gz"
+    output: "gwas/tag_snps/tag_snps_EUR.frq"
     params: log_base=lambda wildcards, output: output[0][:-4]
     conda: "envs/genotype_pcs.yaml"
     shell: "vcftools --gzvcf {input[0]} " + \
                     "--freq " + \
                     "--out {params.log_base} "
 
-rule select_taq_egyptian:
+rule select_tag_egyptian:
     input: "vep_annotation/vep.vcf.gz", \
-           "gwas/taq_snps/taq_snps.rsids"
-    output: "gwas/taq_snps/taq_snps_EGP.vcf.gz"
+           "gwas/tag_snps/tag_snps.rsids"
+    output: "gwas/tag_snps/tag_snps_EGP.vcf.gz"
     params: log_base=lambda wildcards, output: output[0][:-7]
     conda: "envs/genotype_pcs.yaml"
     shell: "vcftools --gzvcf {input[0]} " + \
@@ -445,22 +445,24 @@ rule select_taq_egyptian:
                     "--out {params.log_base} " + \
                     "--stdout | bgzip > {output[0]}"
 
-rule af_taq_egyptian:
-    input: "gwas/taq_snps/taq_snps_EGP.vcf.gz"
-    output: "gwas/taq_snps/taq_snps_EGP.frq"
+rule af_tag_egyptian:
+    input: "gwas/tag_snps/tag_snps_EGP.vcf.gz"
+    output: "gwas/tag_snps/tag_snps_EGP.frq"
     params: log_base=lambda wildcards, output: output[0][:-4]
     conda: "envs/genotype_pcs.yaml"
     shell: "vcftools --gzvcf {input[0]} " + \
                     "--freq " + \
                     "--out {params.log_base} "
 
-rule compare_taq_af:
-    input: "gwas/taq_snps/taq_snps_EUR.frq", "gwas/taq_snps/taq_snps_EGP.frq"
-    output: "gwas/taq_snps/taq_snps_af.txt", "gwas/taq_snps/taq_snps_af_multiallelic.txt" 
+rule compare_tag_af:
+    input: "gwas/tag_snps/tag_snps_EUR.frq", "gwas/tag_snps/tag_snps_EGP.frq"
+    output: "gwas/tag_snps/tag_snps_af.txt", \
+            "gwas/tag_snps/tag_snps_af_multiallelic.txt" 
     run:
         header = "\t".join(["CHROM","POS","REF","ALT","EUR_N_CHR","EUR_ALT_AF","EGP_N_CHR","EGP_ALT_AF"])
         header_multi = "\t".join(["CHROM","POS","REF","ALT","EUR_N_CHR","EUR_ALT_AF"])
         eur_af = {}
+        eur_af_present = {}
         with open(input[0],"r") as f_in:
             for line in f_in:
                 # Skip header
@@ -469,7 +471,7 @@ rule compare_taq_af:
                 s = line.strip("\n").split("\t")
                 chrom = s[0]
                 pos = s[1]
-                # Make sure all taq SNPs are in fact bi-allelic
+                # Make sure all tag SNPs are in fact bi-allelic
                 assert(s[2] == "2")
                 ref,ref_af = s[4].split(":")
                 alt,alt_af = s[5].split(":")
@@ -478,6 +480,7 @@ rule compare_taq_af:
                 nchrom = s[3]
                 loc = "\t".join([chrom,pos,ref,alt])
                 eur_af[loc] = [nchrom,alt_af]
+                eur_af_present[loc] = [nchrom,alt_af]
         with open(input[1],"r") as f_in, open(output[0],"w") as f_out, \
              open(output[1],"w") as f_out_multi:
             for line in f_in:
@@ -491,7 +494,7 @@ rule compare_taq_af:
                 if chrom[:3] == "chr":
                     chrom = chrom[3:]
                 pos = s[1]
-                # Make sure all taq SNPs are in fact bi-allelic
+                # Make sure all tag SNPs are in fact bi-allelic
                 assert(s[2] == "2")
                 ref,ref_af = s[4].split(":")
                 alt,alt_af = s[5].split(":")
@@ -504,11 +507,19 @@ rule compare_taq_af:
                     f_out_multi.write(loc+"\t"+"\t".join(egp_af)+"\n")
                 else:
                     f_out.write(loc+"\t"+"\t".join(eur_af[loc])+"\t"+"\t".join(egp_af)+"\n")
+                    del eur_af_present[loc]
+                # remove this locus, it is present in Egyptian data
+            # Those tag SNPs not called in the Egyptian data have allele 
+            # frequency of zero
+            for loc in eur_af_present:
+                 f_out.write(loc+"\t"+"\t".join(eur_af_present[loc])+"\t220\t0\n")
 
-rule plot_taq_af_diff:
-    input: "gwas/taq_snps/taq_snps_af.txt"
-    output: "gwas/taq_snps/taq_af_diff.pdf"
-    script: "scripts/plot_taq_af_diff.R"
+rule plot_tag_af_diff:
+    input: "gwas/tag_snps/tag_snps_af.txt"
+    output: "gwas/tag_snps/tag_af_diff_hist.pdf", \
+            "gwas/tag_snps/tag_af_diff_scatter.pdf", \
+            "gwas/tag_snps/tag_af_diff_missing.pdf"
+    script: "scripts/plot_tag_af_diff.R"
         
             
 
