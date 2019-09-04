@@ -457,7 +457,8 @@ rule af_tag_egyptian:
 rule compare_tag_af:
     input: "gwas/tag_snps/tag_snps_EUR.frq", "gwas/tag_snps/tag_snps_EGP.frq"
     output: "gwas/tag_snps/tag_snps_af.txt", \
-            "gwas/tag_snps/tag_snps_af_multiallelic.txt" 
+            "gwas/tag_snps/tag_snps_af_multiallelic.txt", \
+            "gwas/tag_snps/tag_snps_posofmissingrsid.txt"
     run:
         header = "\t".join(["CHROM","POS","REF","ALT","EUR_N_CHR","EUR_ALT_AF","EGP_N_CHR","EGP_ALT_AF"])
         header_multi = "\t".join(["CHROM","POS","REF","ALT","EUR_N_CHR","EUR_ALT_AF"])
@@ -482,7 +483,8 @@ rule compare_tag_af:
                 eur_af[loc] = [nchrom,alt_af]
                 eur_af_present[loc] = [nchrom,alt_af]
         with open(input[1],"r") as f_in, open(output[0],"w") as f_out, \
-             open(output[1],"w") as f_out_multi:
+             open(output[1],"w") as f_out_multi, \
+             open(output[2],"w") as f_out_missing:
             for line in f_in:
                 # Skip header; write new header
                 if line[:5] == "CHROM":
@@ -507,12 +509,36 @@ rule compare_tag_af:
                     f_out_multi.write(loc+"\t"+"\t".join(egp_af)+"\n")
                 else:
                     f_out.write(loc+"\t"+"\t".join(eur_af[loc])+"\t"+"\t".join(egp_af)+"\n")
+                    # Remove this locus, it is present in Egyptian data
                     del eur_af_present[loc]
-                # remove this locus, it is present in Egyptian data
             # Those tag SNPs not called in the Egyptian data have allele 
             # frequency of zero
             for loc in eur_af_present:
                  f_out.write(loc+"\t"+"\t".join(eur_af_present[loc])+"\t220\t0\n")
+                 missing_chr = loc.split("\t")[0]
+                 missing_pos = loc.split("\t")[1]
+                 start = str(int(missing_pos)-15)
+                 end = str(int(missing_pos)+15)
+                 f_out_missing.write("chr"+missing_chr+"\t"+start+"\t"+end+"\n")
+
+# There are only two positions of "missing" rsids in the Egyptian data
+# (chr12:102577841 and chr17:78711314);
+# Further within the MHC locus (chr6:28510020-33480577) are 42 positions
+# Here we check whether there is variant data in the region surrounding the 
+# missing SNP positions in order to check whether missing SNPs are maybe caused 
+# by inconsistent indel normalisation; this appears to be for about 20 positions
+rule select_missing_tag_egyptian_by_pos:
+    input: "vep_annotation/vep.vcf.gz", \
+           "gwas/tag_snps/tag_snps_posofmissingrsid.txt"
+    output: "gwas/tag_snps/tag_snps_EGP_by_pos.vcf.gz"
+    params: log_base=lambda wildcards, output: output[0][:-7]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--bed {input[1]} " + \
+                    "--recode-INFO-all " + \
+                    "--recode " + \
+                    "--out {params.log_base} " + \
+                    "--stdout | bgzip > {output[0]}"
 
 rule plot_tag_af_diff:
     input: "gwas/tag_snps/tag_snps_af.txt"
@@ -521,7 +547,80 @@ rule plot_tag_af_diff:
             "gwas/tag_snps/tag_af_diff_missing.pdf"
     script: "scripts/plot_tag_af_diff.R"
         
-            
+rule get_tag_snps_in_egyptians:
+    input: "gwas/tag_snps/tag_snps_EGP.vcf.gz"
+    output: "gwas/tag_snps/tag_snps_egyptians.rsids"
+    shell: "zcat {input} | grep -v '#' | cut -f 3 > {output}"
+
+rule get_tag_snps_and_pos_in_egyptians:
+    input: "gwas/tag_snps/tag_snps_EGP.vcf.gz"
+    output: "gwas/tag_snps/tag_snppos_egyptians.txt"
+    shell: "zcat {input} | grep -v '#' | " + \
+           "awk '{{print $1 \"_\" $2 \"_\" $3}}' | " + \
+           "cut -c 4- > {output}"
+
+TAG_SNPPOS = []
+if os.path.exists("gwas/tag_snps/tag_snppos_egyptians.txt"):
+    with open("gwas/tag_snps/tag_snppos_egyptians.txt","r") as f_in:
+        for line in f_in:
+            TAG_SNPPOS.append(line.strip("\n"))
+
+rule bed_for_eur_locus_extraction:
+    output: "gwas/tag_snps/{rsid_pos}_EUR.bed"
+    run:
+        chrom,pos,rsid = wildcards.rsid_pos.split("_")
+        start = str(int(pos)-1000000)
+        end = str(int(pos)+1000000)
+        with open(output[0],"w") as f_out:
+            f_out.write("\t".join([chrom,start,end])+"\n")
+
+rule index_eur_variants:
+    input: "gwas/ld/EUR_GRCh38.vcf.gz"
+    output: "gwas/ld/EUR_GRCh38.vcf.gz.tbi"
+    shell: "tabix -p vcf {input}" 
+
+# Extract the SNPs within a window of +/-1MB
+rule tag_snp_loci_european:
+    input: "gwas/ld/EUR_GRCh38.vcf.gz", \
+           "gwas/ld/EUR_GRCh38.vcf.gz.tbi", \
+           "gwas/tag_snps/{rsid_pos}_EUR.bed"
+    output: "gwas/tag_snps/{rsid_pos}_EUR.vcf.gz"
+    params: log_base=lambda wildcards, output: output[0][:-7]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "bcftools view --regions-file {input[2]} {input[0]} | " + \
+           "bgzip > {output[0]}"
+
+# For the Egyptian variants, we need a trailing "chr" in the chromsome 
+# defintion in the bed file
+rule bed_for_egp_locus_extraction:
+    output: "gwas/tag_snps/{rsid_pos}_EGP.bed"
+    run:
+        chrom,pos,rsid = wildcards.rsid_pos.split("_")
+        start = str(int(pos)-1000000)
+        end = str(int(pos)+1000000)
+        with open(output[0],"w") as f_out:
+            f_out.write("\t".join(["chr"+chrom,start,end])+"\n")
+
+rule index_egp_variants:
+    input: "vep_annotation/vep.vcf.gz"
+    output: "vep_annotation/vep.vcf.gz.tbi"
+    shell: "tabix -p vcf {input}" 
+
+# Extract the SNPs within a window of +/-1MB
+rule tag_snp_loci_egyptian:
+    input: "vep_annotation/vep.vcf.gz", \
+           "vep_annotation/vep.vcf.gz.tbi", \
+           "gwas/tag_snps/{rsid_pos}_EGP.bed"
+    output: "gwas/tag_snps/{rsid_pos}_EGP.vcf.gz"
+    params: log_base=lambda wildcards, output: output[0][:-7]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "bcftools view --regions-file {input[2]} {input[0]} | " + \
+           "bgzip > {output[0]}"
+
+rule tag_snp_loci_european_egyptian_all:
+    input: expand("gwas/tag_snps/{rsid_pos}_EUR.vcf.gz",rsid_pos=TAG_SNPPOS),
+           expand("gwas/tag_snps/{rsid_pos}_EGP.vcf.gz",rsid_pos=TAG_SNPPOS)    
+
 
 ########### Matching Egyptian common variants and GWAS data ###########
 
