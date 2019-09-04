@@ -619,8 +619,55 @@ rule tag_snp_loci_egyptian:
 
 rule tag_snp_loci_european_egyptian_all:
     input: expand("gwas/tag_snps/{rsid_pos}_EUR.vcf.gz",rsid_pos=TAG_SNPPOS),
-           expand("gwas/tag_snps/{rsid_pos}_EGP.vcf.gz",rsid_pos=TAG_SNPPOS)    
+           expand("gwas/tag_snps/{rsid_pos}_EGP.vcf.gz",rsid_pos=TAG_SNPPOS)
 
+rule make_eur_snp_pos_file:
+    output: "gwas/tag_snps/{rsid_pos}_EUR.pos"
+    run:
+        chrom,pos,rsid = wildcards.rsid_pos.split("_")
+        with open(output[0],"w") as f_out:
+            # vcftools skips the first row, assuming it is a comment or so
+            f_out.write("#\n")
+            # write chromosome and position to file
+            f_out.write(chrom+"\t"+pos+"\n")    
+
+rule compute_european_proxy_snps:
+    input: "gwas/tag_snps/{rsid_pos}_EUR.vcf.gz",
+           "gwas/tag_snps/{rsid_pos}_EUR.pos"
+    output: "gwas/tag_snps/{rsid_pos}_EUR.list.geno.ld"
+    params: log_base=lambda wildcards, output: output[0][:-13]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--geno-r2-positions {input[1]} " + \
+                    "--ld-window-bp 1000000 " + \
+                    "--min-r2 0.8 " + \
+                    "--out {params.log_base} "
+
+rule make_egp_snp_pos_file:
+    output: "gwas/tag_snps/{rsid_pos}_EGP.pos"
+    run:
+        chrom,pos,rsid = wildcards.rsid_pos.split("_")
+        with open(output[0],"w") as f_out:
+            # vcftools skips the first row, assuming it is a comment or so
+            f_out.write("#\n")
+            # write chromosome and position to file
+            f_out.write("chr"+chrom+"\t"+pos+"\n")    
+
+rule compute_egyptian_proxy_snps:
+    input: "gwas/tag_snps/{rsid_pos}_EGP.vcf.gz",
+           "gwas/tag_snps/{rsid_pos}_EGP.pos"
+    output: "gwas/tag_snps/{rsid_pos}_EGP.list.geno.ld"
+    params: log_base=lambda wildcards, output: output[0][:-13]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--geno-r2-positions {input[1]} " + \
+                    "--ld-window-bp 1000000 " + \
+                    "--min-r2 0.8 " + \
+                    "--out {params.log_base} "
+
+rule compute_proxy_snps:
+    input: expand("gwas/tag_snps/{rsid_pos}_EUR.list.geno.ld",rsid_pos=TAG_SNPPOS),
+           expand("gwas/tag_snps/{rsid_pos}_EGP.list.geno.ld",rsid_pos=TAG_SNPPOS)
 
 ########### Matching Egyptian common variants and GWAS data ###########
 
