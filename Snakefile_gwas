@@ -671,44 +671,62 @@ rule compute_proxy_snps:
 
 # Make a file with the proxy SNP numbers and add information such as MAF etc.
 rule num_proxy_snps:
-    input: "gwas/tag_snps/tag_snps_af.txt",
+    input: "gwas/tag_snps/tag_snps_af.txt", \
+           "gwas/tag_snps/proxycomparison.txt", \
            expand("gwas/tag_snps/{rsid_pos}_{pop}.list.geno.ld", \
                   rsid_pos=TAG_SNPPOS, pop=["EUR","EGP"])
     output: "gwas/tag_snps/num_proxies.txt"
     run: 
         # Read in the tag SNP proxy files
-        num_proxies = {}
-        for filename in input[1:]:
+        num_proxies = {}       
+        for filename in input[2:]:
+            proxy_positions = {}   
             with open(filename,"r") as f_in:
-                print(filename.split("/")[-1].split(".")[0].split("_"))
                 chrom,pos,rsid,pop = filename.split("/")[-1].split(".")[0].split("_")
                 position_pop = "\t".join([chrom,pos,pop])
                 num_proxies[position_pop] = str(len(f_in.readlines())-1)
+        # Read in the proxycomparison (i.e. shared, *-only, etc.)
+        # There are 6 tag snps that are multiallelic in the Egyptian data
+        # but having the same rsid. We don't want to use them because LD is
+        # likely not computed for the correct allel. Thus we remove all 
+        # positions that occur more than once
+        num_proxyoverlap = {}
+        with open(input[1],"r") as f_in:
+            for line in f_in:
+                if line[:5] == "CHROM":
+                    continue
+                s = line.strip("\n").split("\t")
+                chrom_pos = "\t".join(s[:2])
+                num_proxyoverlap[chrom_pos] = "\t".join(s[2:])
         # Read in the base tag SNP file to which to add proxy numbers
         with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
             for line in f_in:
                 # Write new header
                 if line[:5] == "CHROM":
-                    f_out.write(line.strip("\n")+"\tEUR_N_PROXY\tEGP_N_PROXY\n")
+                    f_out.write(line.strip("\n")+"\tEUR_N_PROXY\tEGP_N_PROXY\tPROXY_SHARED\tPROXY_EUR_ONLY\tPROXY_EGP_ONLY\n")
                     continue
                 s = line.split("\t")
                 chrom = s[0]
                 pos = s[1]
                 if chrom+"\t"+pos+"\tEUR" in num_proxies:
                     num_eur = num_proxies[chrom+"\t"+pos+"\tEUR"]
+                    proxy_sharing = num_proxyoverlap[chrom+"\t"+pos]
                 else:
                     num_eur = "NA"
+                    proxy_sharing = "NA\tNA\tNA"
                 if chrom+"\t"+pos+"\tEGP" in num_proxies:
                     num_egp = num_proxies[chrom+"\t"+pos+"\tEGP"]
                 else:
                     num_egp = "NA"
-                f_out.write(line.strip("\n")+"\t"+num_eur+"\t"+num_egp+"\n")
+                f_out.write(line.strip("\n")+"\t"+num_eur+"\t"+num_egp+"\t"+proxy_sharing+"\n")
 
 rule plot_proxy_snp_numbers:
     input: "gwas/tag_snps/num_proxies.txt"
     output: "gwas/tag_snps/proxy_number_dist.pdf"
     script: "scripts/tag_proxies.R"
 
+# Watchout: We count proxies at the same position individually, i.e. duplicate
+# positions in the list.geno.ld file are counted each
 rule compare_proxy_snps:
     input: "gwas/tag_snps/{rsid_pos}_EUR.list.geno.ld", \
            "gwas/tag_snps/{rsid_pos}_EGP.list.geno.ld"
@@ -716,12 +734,14 @@ rule compare_proxy_snps:
     run:
         # Record European proxy positions
         proxy_eur = {}
+        num_proxy_eur = 0
         with open(input[0],"r") as f_eur:
              for line in f_eur:
                 if line[:3] == "CHR":
                     continue
                 chrom_pos = "chr"+"\t".join(line.split("\t")[2:4])
                 proxy_eur[chrom_pos] = True
+                num_proxy_eur += 1
         # Check Egyptian proxy positions and count same and different numbers
         same_proxy = 0
         eur_only = 0
@@ -731,13 +751,11 @@ rule compare_proxy_snps:
                 if line[:3] == "CHR":
                     continue
                 chrom_pos = "\t".join(line.split("\t")[2:4])
-                print(chrom_pos)
                 if chrom_pos in proxy_eur:
                     same_proxy += 1
-                    del proxy_eur[chrom_pos]
                 else:
                     egp_only += 1
-        eur_only = len(proxy_eur)
+        eur_only = num_proxy_eur-same_proxy
         with open(output[0],"w") as f_out:
             chrom_pos = "\t".join(wildcards.rsid_pos.split("_")[:2])
             f_out.write("CHROM\tPOS\tSHARED\tEUR_ONLY\tEGP_ONLY\n")
@@ -752,6 +770,9 @@ rule compare_proxy_snps_all:
             for filename in input:
                 with open(filename,"r") as f_in:
                     for line in f_in:
+                        # Skip header
+                        if line[:5] == "CHROM":
+                            continue
                         f_out.write(line)
 
 
