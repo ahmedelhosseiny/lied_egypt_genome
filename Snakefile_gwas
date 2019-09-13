@@ -722,7 +722,12 @@ rule num_proxy_snps:
 
 rule plot_proxy_snp_numbers:
     input: "gwas/tag_snps/num_proxies.txt"
-    output: "gwas/tag_snps/proxy_number_dist.pdf"
+    output: "gwas/tag_snps/figures/proxy_number.pdf", \
+            "gwas/tag_snps/figures/proxysharing.pdf",\
+            "gwas/tag_snps/figures/af_difference.pdf",\
+            "gwas/tag_snps/figures/eurvsegp.pdf",\
+            "gwas/tag_snps/figures/eur_af_vs_proxynum.pdf",\
+            "gwas/tag_snps/figures/egp_af_vs_proxynum.pdf"
     script: "scripts/tag_proxies.R"
 
 # Watchout: We count proxies at the same position individually, i.e. duplicate
@@ -781,50 +786,51 @@ rule compare_proxy_snps_all:
 # Extract those Egyptian population-specific SNPs that are within 100kb of a SNP 
 # listed in the GWAS catalog
 rule egyptian_popspecific_in_proximity:
-    input: "gwas/results/hg38_gwas_{disease}_catalog.tab",
-           "vep_annotation/vep_egyptian_popspecific.vcf.gz"
-    output: "gwas/results_{distance}/hg38_gwas_{disease}_{distance}_matched.txt"
+    input: "gwas/results/{disease}_catalog.tab",
+           "vep_annotation/popspecific_0.01_final.txt"
+    output: "gwas/results_{distance}/{disease}_{distance}_matched.txt"
     run:
         # Get the distance; SNPs within distance of the GWAS SNP are matched
         dist = int(wildcards.distance)
         # Read in positions of Egyptian common SNPs
-        vcf = {}
-        with gzip.open(input[1], 'rb') as f_vcf:
-            for line in f_vcf:
-                decoded_line = line.decode()
-                if decoded_line[0] == '#':
-                    header_vcf = decoded_line[1:]
+        pop_spec = {}
+        header_pop = ""
+        with open(input[1], 'r') as f_in:
+            for line in f_in:
+                if line[:3] == 'chr':
+                    header_pop = line
                     continue
-                s = decoded_line.split("\t")
+                s = line.split("\t")
                 chrom = s[0]
-                if chrom[:3] == "chr":
-                    chrom = chrom[3:]
                 pos = s[1]
-                if chrom in vcf:
-                    vcf[chrom].append([chrom,int(pos),decoded_line])
+                if chrom in pop_spec:
+                    pop_spec[chrom].append([chrom,int(pos),line])
                 else:
-                    vcf[chrom] = [[chrom,int(pos),decoded_line]]
+                    pop_spec[chrom] = [[chrom,int(pos),line]]
         # Go over the GWAS catalog lines associations for this disease
         with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
             for line in f_in:
                 # Skip header
                 if line[:4] == "DATE":
-                    f_out.write(line.strip("\n")+"\t"+header_vcf)
+                    f_out.write(line.strip("\n")+"\t"+header_pop)
                     continue
                 s = line.split("\t")
                 chrom = s[11]
+                # Skip GWAS catalog associations not on the autosomes
+                if not chrom in [str(x) for x in range(23)]:
+                    continue
                 # Skip GWAS catalog associations without position specified
                 if s[12] == "" or " x " in s[12] or ";" in s[12]:
                     continue
                 pos = int(s[12])
-                for variant in vcf[chrom]:
+                for variant in pop_spec[chrom]:
                     if pos-dist <= variant[1] <= pos+dist:
                         f_out.write(line.strip("\n")+"\t"+variant[2]) 
 
 rule egyptian_popspecific_in_proximity_all:
-    input: expand("gwas/results_{distance}/hg38_gwas_{disease}_{distance}_matched.txt", \
+    input: expand("gwas/results_{distance}/{disease}_{distance}_matched.txt", \
                   disease=GWAS_CATALOG_DISEASES, \
-                  distance=["0","10","100","1000","10000","100000"])
+                  distance=["10","100","100000"])#,"0","10","1000","10000","100000"])
         
 
 rule generate_paper_numbers:

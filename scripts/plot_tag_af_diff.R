@@ -16,17 +16,19 @@ hist(data$EUR_ALT_AF-data$EGP_ALT_AF,breaks=100,xlab="European AF - Egyptian AF"
 dev.off()
 
 pdf(fname_out_scatter)
-plot(c(-0.1,1.1),c(-0.1,1.1),type="l",lty=1,col="gray",xlab="European AF",ylab="Egyptian AF", main="",xlim=c(0,1),ylim=c(0,1))
+plot(c(-0.1,1.1),c(-0.1,1.1),type="l",lty=1,col="gray",xlab="European AF",ylab="Egyptian AF", main="",xlim=c(0,1),ylim=c(0,1),lwd=5)
 add=TRUE
-abline(h=0.05,col="gray")
-abline(v=0.05,col="gray")
-abline(a=0.1,b=1,col="gray")
-abline(a=-0.1,b=1,col="gray")
-abline(a=0.2,b=1,col="gray")
-abline(a=-0.2,b=1,col="gray")
-abline(a=0.3,b=1,col="gray")
-abline(a=-0.3,b=1,col="gray")
-points(data$EUR_ALT_AF,data$EGP_ALT_AF,pch=20,cex=0.25)
+blue <- rainbow(10, alpha=0.2)[7]
+red <- rainbow(10, alpha=0.2)[1]
+abline(h=0.05,col=red,lwd=5)
+abline(v=0.05,col=blue,lwd=5)
+abline(a=0.1,b=1,col=red,lwd=5)
+abline(a=-0.1,b=1,col=blue,lwd=5)
+abline(a=0.2,b=1,col=red,lwd=5)
+abline(a=-0.2,b=1,col=blue,lwd=5)
+abline(a=0.3,b=1,col=red,lwd=5)
+abline(a=-0.3,b=1,col=blue,lwd=5)
+points(data$EUR_ALT_AF,data$EGP_ALT_AF,pch=21,cex=0.5,col="grey40",bg="grey90")
 dev.off()
 
 pdf(fname_out_missing)

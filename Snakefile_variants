@@ -1060,7 +1060,7 @@ rule symlink_var_step2_file:
 
 # Select common variants in the Egyptian cohort for further consideration. 
 # These should be 
-# * no missing genotypes (--max-missing)
+# * limited number of missing genotypes (--max-missing) (10 individuals max)
 # * have minor allel frequency of 5% (--maf)
 # These are the variants for further characterization concerning population
 # frequencies
@@ -1077,9 +1077,328 @@ rule extract_egyptian_common_vars_w_indels_and_missing_gt:
                     "--out {params.log_base} " + \
                     "--stdout | bgzip > {output}"
 
+rule symlink_freq_file:
+    input: "/data/lied_egypt_genome/output_wgs/highest_maf/vep_egyptian_common.freqs.final.txt.gz"
+    output: "vep_annotation/vep_egyptian_common.freqs.final.txt.gz"
+    shell: "ln -s {input} {output}"
+
+#This counts the occurence of ref alt allele combinations of SNVs (not indels)
+# There are more purine-to-purine and pyrimidin-to-pyrimidin exchanges
+# Also there are more nucleotide exchanges involving G and C (presumably because 
+# of increased GC content in the sequencing data)
+rule number_allele_combinations:
+    input: "vep_annotation/vep_egyptian_common.freqs.noindels.txt"
+    output: "vep_annotation/number_ref_alt_alleles.txt"
+    shell: "cat {input} | cut -f 5,6 | sort | uniq -c > {output}"
+
+rule number_flags:
+    input: "vep_annotation/vep_egyptian_common.freqs.noindels.txt"
+    output: "vep_annotation/number_flags.txt"
+    shell: "cat {input} | cut -f 7 | sort | uniq -c > {output}"
+
+rule number_n_mappings:
+    input: "vep_annotation/vep_egyptian_common.freqs.noindels.txt"
+    output: "vep_annotation/number_n_mappings.txt"
+    shell: "cat {input} | cut -f 8 | sort | uniq -c > {output}"
+
+rule number_n_alleles:
+    input: "vep_annotation/vep_egyptian_common.freqs.noindels.txt"
+    output: "vep_annotation/number_n_alleles.txt"
+    shell: "cat {input} | cut -f 9 | sort | uniq -c > {output}"
+
+rule number_highest_ref_freq_pop:
+    input: "vep_annotation/vep_egyptian_common.freqs.noindels.txt"
+    output: "vep_annotation/number_highest_ref_freq_pop.txt"
+    shell: "cat {input} | cut -f 11 | sort | uniq -c | sort -n -r > {output}"
+
+rule number_highest_alt_freq_pop:
+    input: "vep_annotation/vep_egyptian_common.freqs.noindels.txt"
+    output: "vep_annotation/number_highest_alt_freq_pop.txt"
+    shell: "cat {input} | cut -f 13 | sort | uniq -c | sort -n -r > {output}"
+
+rule number_ref_alt_freq_pop_combinations:
+    input: "vep_annotation/vep_egyptian_common.freqs.noindels.txt"
+    output: "vep_annotation/number_highest_freq_pop_combinations.txt"
+    shell: "cat {input} | cut -f 11,13 | sort | uniq -c > {output}"
+
+rule all_freq_anno_numbers:
+    input: "vep_annotation/number_ref_alt_alleles.txt", \
+           "vep_annotation/number_flags.txt", \
+           "vep_annotation/number_n_mappings.txt", \
+           "vep_annotation/number_n_alleles.txt", \
+           "vep_annotation/number_highest_ref_freq_pop.txt", \
+           "vep_annotation/number_highest_alt_freq_pop.txt", \
+           "vep_annotation/number_highest_freq_pop_combinations.txt"
+
+rule remove_indels:
+    input: "vep_annotation/vep_egyptian_common.freqs.final.txt.gz"
+    output: "vep_annotation/vep_egyptian_common.freqs.noindels.txt"
+    run:
+        with gzip.open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            for encoded_line in f_in:
+                line = encoded_line.decode()
+                s = line.split("\t")
+                if not "-" in s[4] and not "-" in s[5]:
+                    f_out.write(line)
+
+# After contacting the Ensembl help desk, we use only those MAFs used and 
+# documented by the website: 
+# http://www.ensembl.org/info/genome/variation/species/populations.html
+POP_CODES = []
+with open("data/population_codes_vep.txt","r") as f_in:
+    for line in f_in:
+        if line[:4] == "Name":
+            continue
+        POP_CODES.append(line.split("\t")[0])
+rule add_selected_max_alt_freq:
+    input: "vep_annotation/vep_egyptian_common.freqs.noindels.txt"
+    output: "vep_annotation/vep_egyptian_common.freqs.noindels.max.txt"
+    run:
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                if line[:4] == "orig":
+                    header = line.strip("\n")+"\t"+"\t".join(POP_CODES)
+                    header += "\t"+"selected_highest_alt_freq"
+                    header += "\t"+"selected_highest_alt_freq_pop"+"\n"
+                    f_out.write(header)
+                    continue
+                # There are additional tabs in two rows, we report and skip
+                if not len(line.split("\t")) == 15:
+                    print("Line wrongly formated: "+ line)
+                    continue
+                # Initialize a dict with the population codes to use as keys
+                # Initialize with value 0.0, because if a code doesn't occur
+                # it means the variant was not detected in the respective
+                # population.
+                pop_freqs = {k : "0" for k in POP_CODES}
+                alt_freqs = line.strip("\n").split("\t")[-1]
+                freqs = alt_freqs.split(";")[:-1]
+                for freq in freqs:
+                    alt_pop,alt_freq = freq.split("=")
+                    if alt_pop in pop_freqs:
+                        pop_freqs[alt_pop] = alt_freq
+                new_line = line.strip("\n")
+                max_freq = 0.0
+                max_pop = ""
+                for pop in POP_CODES:
+                    # Remember highest alt AF
+                    if float(pop_freqs[pop])> max_freq:
+                        max_freq = float(pop_freqs[pop])
+                        max_pop = pop
+                    new_line += "\t"+pop_freqs[pop]
+                # Add max alt AF
+                new_line += "\t"+str(max_freq)+"\t"+max_pop+"\n"
+                f_out.write(new_line)
 
 
+# Here we obtain the population-specific variants. We annotated only common 
+# variants within the Egyptian population. This means, that we only have 
+# variants in the set that are polymorph in the Egyptians and thus both alleles
+# occur with a minimum of 5% in our Egyptian sample. Still, because a variant
+# may not be bi-allelic in another data set, we cannot assume that the frequency
+# of the reference allele is 1-MAF of the alternative allele and we thus select 
+# population-specific SNPs only by consulting the alternative frequencies.
+rule filter_pop_specific_with_threshold:
+    input: "vep_annotation/vep_egyptian_common.freqs.noindels.max.txt"
+    output: "vep_annotation/popspecific_{threshold}.txt"
+    run:
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                s = line.split("\t")
+                # Write header
+                if line[:4] == "orig":
+                    f_out.write(line)
+                # Skip those variants with flag indicating errors (i.e. not NA)
+                # Skip variants that map to more than one position
+                # Skip also X and Y chromosome calls
+                if not s[6] == "NA" or not s[7] == "1" or s[2] in ["X","Y"]:
+                    continue
+                try:
+                    max_alt_freq = float(s[65])
+                except:
+                    print(line)
+                    continue
+                if max_alt_freq<float(wildcards.threshold):
+                    f_out.write(line)
 
+rule filter_pop_specific_with_threshold_all:
+    input: expand("vep_annotation/popspecific_{threshold}.txt", \
+           threshold=["0.01","0.001","0.0001","0.00001","0.000001"]), \
+           expand("vep_annotation/popspecific_{threshold}.vcf.gz", \
+           threshold=["0.01","0.001","0.0001","0.00001","0.000001"]),
+
+rule get_pos_pop_specific:
+    input: "vep_annotation/popspecific_{threshold}.txt"
+    output: "vep_annotation/popspecific_{threshold}.pos"
+    run:
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                if line[:4] == "orig":
+                    continue
+                s = line.split("\t")
+                f_out.write("chr"+s[2]+"\t"+s[3]+"\n")
+
+rule index_common_snps:
+    input: "vep_annotation/vep_egyptian_common_withindelsandmissinggt.vcf.gz"
+    output: "vep_annotation/vep_egyptian_common_withindelsandmissinggt.vcf.gz.tbi"
+    shell: "tabix -p vcf {input}" 
+
+rule get_pop_specific_vcf:
+    input: "vep_annotation/vep_egyptian_common_withindelsandmissinggt.vcf.gz", \
+           "vep_annotation/vep_egyptian_common_withindelsandmissinggt.vcf.gz.tbi", \
+           "vep_annotation/popspecific_{threshold}.pos"
+    output: "vep_annotation/popspecific_{threshold}.vcf.gz"
+    params: log_base=lambda wildcards, output: output[0][:-7]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "bcftools view --regions-file {input[2]} {input[0]} | " + \
+           "bgzip > {output[0]}"
+
+rule compute_af_for_pop_spec:
+    input: "vep_annotation/popspecific_{threshold}.vcf.gz"
+    output: "vep_annotation/popspecific_{threshold}.frq"
+    params: log_base=lambda wildcards, output: output[0][:-4]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--freq " + \
+                    "--out {params.log_base} "
+
+rule final_table_pop_specific_vars:
+    input: "vep_annotation/popspecific_0.01.txt", \
+           "vep_annotation/popspecific_0.01.frq"
+    output: "vep_annotation/popspecific_0.01_final.txt"
+    run:
+        # Read in AF info and record wether a position is multi-allelic in the
+        # Egyptian data
+        num_alleles = {}
+        alt_afs = {}
+        with open(input[1],"r") as f_in:
+            for line in f_in:
+                if line[:5] == "CHROM":
+                    continue
+                s = line.strip("\n").split("\t")
+                # Remove the chr from the chromosome specification because 
+                # Ensembl annotation doesn't use it
+                chrom = s[0][3:]
+                pos = s[1]
+                if chrom+"\t"+pos in num_alleles:
+                    num_alleles[chrom+"\t"+pos] += 1
+                else:
+                    num_alleles[chrom+"\t"+pos] = 1
+                alt_allel,alt_freq = s[-1].strip("\n").split(":")
+                alt_afs[chrom+"\t"+pos+"\t"+alt_allel] = alt_freq
+        # Go over the large final table, extracted columns for final table and
+        # add Egyptian AF
+        all_lines = []
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                s = line.strip("\n").split("\t")
+                # Write header
+                if line[:4] == "orig":
+                    header = s[2]+"\t"+s[3]+"\t"+s[1]+"\t"+s[4]+"\t"+s[5]
+                    header += "\t"+s[8]+"\t"+"egp_n_alleles_incl_indels"
+                    header += "\t"+"egp_alt_freq"+"\t"
+                    header += s[-2]+"\t"+s[-1]
+                    header += "\t"+s[11]+"\t"+s[12]+"\t"+s[14]+"\n"
+                    f_out.write(header)
+                    continue
+                chrom = s[2]
+                pos = s[3]
+                alt_allel = s[5]
+                # We counted the number of alt alleles before, but 
+                # Ensembl returns the number of alleles all over, including
+                # the reference allele. Thus by adding one we assume that we
+                # observed the reference allele (which for this data set
+                # can savely be assumed)
+                n_alleles = str(int(num_alleles[chrom+"\t"+pos])+1)
+                af = alt_afs[chrom+"\t"+pos+"\t"+alt_allel]
+                out_line = [s[2],s[3],s[1],s[4],s[5],s[8],str(n_alleles),af,s[-2]]
+                out_line += [s[-1],s[11],s[12],s[14]]
+                all_lines.append(out_line)
+            # Sort by chromosome (primary) and position (secondary)
+            sorted_lines = sorted(all_lines,key=lambda x: (int(x[0]),int(x[1])))
+            for entry in sorted_lines:
+                f_out.write("\t".join(entry)+"\n")
+
+
+rule get_pos_pop_specific_final:
+    input: "vep_annotation/popspecific_0.01_final.txt"
+    output: "vep_annotation/popspecific_0.01_final.pos"
+    run:
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                if line[:3] == "chr":
+                    continue
+                s = line.split("\t")
+                f_out.write("chr"+s[0]+"\t"+s[1]+"\n")
+                
+
+rule get_pop_specific_annotated_vcf:
+    input: "vep_annotation/vep.vcf.gz", \
+           "vep_annotation/vep.vcf.gz.tbi", \
+           "vep_annotation/popspecific_0.01_final.pos"
+    output: "vep_annotation/popspecific_0.01_annotated.vcf.gz"
+    params: log_base=lambda wildcards, output: output[0][:-7]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "bcftools view --regions-file {input[2]} {input[0]} | " + \
+           "bgzip > {output[0]}"
+
+# Here, we select all annotation of the population specific SNPs 
+# Every VEP annotation is provided in a seperate line
+# Because the previous bcftools command extracts all variants overlapping the 
+# specified positions, we still also have to filter the annotation list 
+rule annotated_pop_specific_vars_threshold_positionwise:
+    input: "vep_annotation/popspecific_0.01_annotated.vcf.gz"
+    output: "vep_annotation/popspecific_0.01_posannotated.txt"
+    run:
+        with gzip.open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            f_out.write(ANNO_HEADER+"\n")
+            for line in f_in:
+                # Skip header
+                if line.decode()[0] == "#":
+                    continue
+                s = line.decode().split("\t")
+                vep_anno_string = s[7].split("=")[-1]
+                vep_annos = vep_anno_string.split(",")
+                for anno in vep_annos:
+                    f_out.write(("\t").join(s[:5]+anno.split("|"))+"\n")
+
+rule annotated_pop_specific_vars_threshold:
+    input: "vep_annotation/popspecific_0.01_final.txt", \
+           "vep_annotation/popspecific_0.01_posannotated.txt"
+    output: "vep_annotation/popspecific_0.01_annotated.txt"
+    run:
+        # Read in pop-specific positions and alleles
+        snps = {}
+        with open(input[0],"r") as f_in:
+            for line in f_in:
+                # Skip header
+                if line[:3] == "chr":
+                    continue
+                s = line.split("\t")
+                chrom = "chr"+s[0]
+                pos = s[1]
+                alt = s[4]
+                snps["\t".join([chrom,pos,alt])] = True
+        print(snps)
+        with open(input[1],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                # Write header
+                if line[:5] == "CHROM":
+                    f_out.write(line)
+                    continue
+                s = line.split("\t")
+                chrom = s[0]
+                pos = s[1]
+                alt = s[4]
+                if "\t".join([chrom,pos,alt]) in snps:
+                    f_out.write(line)
+
+
+################################################################################
+########## Extracting population-specific variants without rsids  ##############
+################################################################################
+
+                
 ################################################################################
 ####### Performing preprocessing and statistics for SVs called by Axel #########
 ################################################################################
