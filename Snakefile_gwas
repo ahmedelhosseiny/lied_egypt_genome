@@ -544,7 +544,8 @@ rule plot_tag_af_diff:
     input: "gwas/tag_snps/tag_snps_af.txt"
     output: "gwas/tag_snps/tag_af_diff_hist.pdf", \
             "gwas/tag_snps/tag_af_diff_scatter.pdf", \
-            "gwas/tag_snps/tag_af_diff_missing.pdf"
+            "gwas/tag_snps/tag_af_diff_missing.pdf", \
+            "gwas/tag_snps/tag_af_diff_boxplot.pdf"
     script: "scripts/plot_tag_af_diff.R"
         
 rule get_tag_snps_in_egyptians:
