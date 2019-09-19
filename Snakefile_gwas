@@ -542,10 +542,10 @@ rule select_missing_tag_egyptian_by_pos:
 
 rule plot_tag_af_diff:
     input: "gwas/tag_snps/tag_snps_af.txt"
-    output: "gwas/tag_snps/tag_af_diff_hist.pdf", \
-            "gwas/tag_snps/tag_af_diff_scatter.pdf", \
-            "gwas/tag_snps/tag_af_diff_missing.pdf", \
-            "gwas/tag_snps/tag_af_diff_boxplot.pdf"
+    output: "gwas/tag_snps/figures/tag_af_diff_hist.pdf", \
+            "gwas/tag_snps/figures/tag_af_diff_scatter.pdf", \
+            "gwas/tag_snps/figures/tag_af_diff_missing.pdf", \
+            "gwas/tag_snps/figures/tag_af_diff_boxplot.pdf"
     script: "scripts/plot_tag_af_diff.R"
         
 rule get_tag_snps_in_egyptians:
@@ -781,8 +781,51 @@ rule compare_proxy_snps_all:
                             continue
                         f_out.write(line)
 
+rule annotated_loci_files:
+    input: "gwas/tag_snps/num_proxies.txt", \
+           "gwas/results/{disease}_loci.tab"
+    output: "gwas/results/{disease}_loci_annotated.tab"
+    run:
+        snp_pos = {}
+        with open(input[0],"r") as f_in:
+            for line in f_in:
+                if line[:5] == "CHROM":
+                    header = line
+                    continue 
+                s = line.split("\t")
+                chrom = s[0]
+                pos = s[1]
+                snp_pos[chrom+"\t"+pos] = line
+        with open(input[1],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                if line[:4] == "DATE":
+                    f_out.write(line.strip("\n")+"\t"+header)
+                    continue 
+                s = line.split("\t")
+                chrom = s[11]
+                pos = s[12]
+                f_out.write(line.strip("\n")+"\t"+snp_pos[chrom+"\t"+pos])    
 
-########### Matching Egyptian common variants and GWAS data ###########
+rule combine_annotated_loci_files_all:
+    input: expand("gwas/results/{disease}_loci_annotated.tab", disease=GWAS_CATALOG_DISEASES_LOCI_LD)
+    output: "gwas/results/combined_loci_annotated.txt"
+    run: 
+        header_written = False
+        with open(output[0],"w") as f_out:
+            for filename in input:
+                with open(filename,"r") as f_in:
+                    for line in f_in:
+                        if line[:4] == "DATE":                
+                            if not header_written:
+                                f_out.write(line)
+                                header_written = True
+                            continue
+                        f_out.write(line)
+                        
+
+
+
+########### Matching Egyptian population-specific variants and GWAS data #######
 
 # Extract those Egyptian population-specific SNPs that are within 100kb of a SNP 
 # listed in the GWAS catalog
@@ -793,7 +836,7 @@ rule egyptian_popspecific_in_proximity:
     run:
         # Get the distance; SNPs within distance of the GWAS SNP are matched
         dist = int(wildcards.distance)
-        # Read in positions of Egyptian common SNPs
+        # Read in positions of Egyptian population-specific SNPs
         pop_spec = {}
         header_pop = ""
         with open(input[1], 'r') as f_in:
@@ -831,7 +874,87 @@ rule egyptian_popspecific_in_proximity:
 rule egyptian_popspecific_in_proximity_all:
     input: expand("gwas/results_{distance}/{disease}_{distance}_matched.txt", \
                   disease=GWAS_CATALOG_DISEASES, \
-                  distance=["10","100","100000"])#,"0","10","1000","10000","100000"])
+                  distance=["10","100","1000","10000","100000"])#,"0","10","1000","10000","100000"])
+        
+
+######################### Matching Egyptian SVs and GWAS data ##################
+
+# Extract those Egyptian SVs that are within a certain distances of a SNP listed
+# in the GWAS catalog
+rule egyptian_sv_in_proximity:
+    input: "gwas/results/{disease}_catalog.tab",
+           "sv_stats/egyptians_{sv_type}.vcf"
+    output: "gwas/results_{distance}/{sv_type}/{disease}_{distance}_{sv_type}_matched.txt"
+    run:
+        # Get the distance; SNPs within distance of the GWAS SNP are matched
+        dist = int(wildcards.distance)
+        # Read in positions of Egyptian population-specific SNPs
+        svs = {}
+        header_pop = ""
+        with open(input[1], 'r') as f_in:
+            for line in f_in:
+                if line[0] == '##':
+                    continue
+                if line[0] == '#':
+                    header_pop = line[1:]
+                    continue
+                s = line.split("\t")
+                # Only consider passing SV calls
+                if not s[6] == "PASS":
+                    continue
+                chrom = s[0]
+                if chrom[:3] == "chr":
+                    chrom = chrom[3:]
+                pos = s[1]
+                if chrom in svs:
+                    svs[chrom].append([chrom,int(pos),line])
+                else:
+                    svs[chrom] = [[chrom,int(pos),line]]
+                # Get the end position
+                chr2 = ""
+                pos2 = ""
+                for entry in s[7].split(";"):
+                    if not len(entry.split("=")) == 2:
+                        continue
+                    first,second = entry.split("=")
+                    if first == "CHR2":
+                        chrom2 = second
+                        if chrom2[:3] == "chr":
+                            chrom2 = chrom2[3:]
+                    if first == "END":
+                        assert(chrom == chrom2)
+                        if chrom2 in svs:
+                            svs[chrom2].append([chrom2,int(pos),line])
+                        else:
+                            svs[chrom2] = [[chrom2,int(pos),line]]
+        # Go over the GWAS catalog lines associations for this disease
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            for line in f_in:
+                # Skip header
+                if line[:4] == "DATE":
+                    f_out.write(line.strip("\n")+"\t"+header_pop)
+                    continue
+                s = line.split("\t")
+                chrom = s[11]
+                # Skip GWAS catalog associations not on the autosomes
+                if not chrom in [str(x) for x in range(23)]:
+                    continue
+                # Skip GWAS catalog associations without position specified
+                if s[12] == "" or " x " in s[12] or ";" in s[12]:
+                    continue
+                pos = int(s[12])
+                # For insertions, e.g., there are not SVs on all chromosomes
+                if not chrom in svs:
+                    continue
+                for variant in svs[chrom]:
+                    if pos-dist <= variant[1] <= pos+dist:
+                        f_out.write(line.strip("\n")+"\t"+variant[2]) 
+
+rule egyptian_sv_in_proximity_all:
+    input: expand("gwas/results_{distance}/{sv_type}/{disease}_{distance}_{sv_type}_matched.txt", \
+                  disease=GWAS_CATALOG_DISEASES, \
+                  sv_type=["insertions","deletions"],\
+                  distance=["10"])#,"100","100000","deletions","insertions","inversions","duplications","translocations"
         
 
 rule generate_paper_numbers:

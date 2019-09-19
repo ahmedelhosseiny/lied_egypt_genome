@@ -10,6 +10,8 @@ fname_out_eur_af_vs_proxynum <- snakemake@output[[5]]
 fname_out_egp_af_vs_proxynum <- snakemake@output[[6]]
 
 data <- read.table(fname_in,header=T,colClasses=c("numeric","numeric","factor","factor","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric"))
+data <- data[data$EGP_N_CHR>=200,]
+dim(data)
 
 # Data consistency check for European proxys, this should return nothing
 which(!(data$PROXY_SHARED+data$PROXY_EUR_ONLY == data$EUR_N_PROXY))

@@ -8,8 +8,8 @@ fname_out_missing <- snakemake@output[[3]]
 fname_out_boxplot_afdiff <- snakemake@output[[4]]
 
 data <- read.table(fname_in, header=T)
-dim(data)
 data <- data[data$EGP_N_CHR>=200,]
+dim(data)
 
 # Plotting
 pdf(fname_out_hist)
