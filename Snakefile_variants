@@ -1398,7 +1398,42 @@ rule annotated_pop_specific_vars_threshold:
 ########## Extracting population-specific variants without rsids  ##############
 ################################################################################
 
-                
+# We use variants without rsid assigned by VEP which are
+# * no indels (also too complicated) (--remove-indels)
+# * max 10 individuals with missing genotypes, i.e. allele count >=100
+# * have minor allel frequency of 5%
+# * are autosomal (not X or Y)
+rule select_variants_wo_dbsnp_id:
+    input: "vep_annotation/vep.vcf.gz"
+    output: "vep_annotation/vep_egyptian_common_wo_rsid.vcf"
+    run:
+        with gzip.open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            for encoded_line in f_in:
+                line = encoded_line.decode()
+                if line[0] == "#":
+                    f_out.write(line)
+                    continue
+                vep_rsid = line.split("|")[17][:2]
+                s = line.split("\t")
+                chrom = s[0]
+                ref = s[3]
+                alt = s[4]
+                info = s[7].split(";")
+                ac_string,ac = info[0].split("=")
+                assert(ac_string == "AC")
+                an_string,an = info[2].split("=")
+                assert(an_string == "AN")
+                alt = s[4]
+                # only variants wo rsid and in at least 100 individuals (i.e. 
+                # in 200 chromosomes)
+                if not vep_rsid == "rs" and int(an)>=200 and not chrom in ["chrX","chrY"]:
+                    # only if not an indel
+                    if ref in ["A","C","G","T"] and alt in ["A","C","G","T"]:
+                        af = int(ac)/int(an)
+                        if af>=0.05:
+                            f_out.write(line)
+        
+
 ################################################################################
 ####### Performing preprocessing and statistics for SVs called by Axel #########
 ################################################################################
