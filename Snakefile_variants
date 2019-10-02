@@ -1426,13 +1426,13 @@ rule select_variants_wo_dbsnp_id:
                 alt = s[4]
                 # only variants wo rsid and in at least 100 individuals (i.e. 
                 # in 200 chromosomes)
-                if not vep_rsid == "rs" and int(an)>=200 and not chrom in ["chrX","chrY"]:
+                if not vep_rsid[:2] == "rs" and int(an)>=200 and not chrom in ["chrX","chrY"]:
                     # only if not an indel
                     if ref in ["A","C","G","T"] and alt in ["A","C","G","T"]:
                         af = int(ac)/int(an)
                         if af>=0.05:
                             f_out.write(line)
-        
+
 
 ################################################################################
 ####### Performing preprocessing and statistics for SVs called by Axel #########
