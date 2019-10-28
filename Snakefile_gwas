@@ -7,10 +7,24 @@ from decimal import Decimal
 import math
 
 
+# Because some files are generated, this workflow has to be run in various steps
+# one after another. Reproduce results by running in the specified order:
+# snakemake --rerun-incomplete -j 10 -k --use-conda -s Snakefile_gwas -p gwas/results/custom_disease_ids.txt
+# snakemake --rerun-incomplete -j 10 -k --use-conda -s Snakefile_gwas -p gwas/results/num_recurrentloci_per_disease.txt
+# snakemake --rerun-incomplete -j 10 -k --use-conda -s Snakefile_gwas -p gwas/results/num_recurrentlocivcf_per_disease.txt
+# snakemake --rerun-incomplete -j 10 -k --use-conda -s Snakefile_gwas -p gwas/results/num_recurrentlocild_per_disease.txt
+# snakemake --rerun-incomplete -j 10 -k --use-conda -s Snakefile_gwas -p gwas/tag_snps/tag_snppos_egyptians.txt
+# snakemake --rerun-incomplete -j 10 -k --use-conda -s Snakefile_gwas -p all
+# snakemake --rerun-incomplete -j 10 -k --use-conda -s Snakefile_gwas -p egyptian_sv_in_proximity_all
+
+
 rule all:
     input: "gwas/results/num_diseases.txt", \
            expand("gwas/results/num_{analysis}_per_disease.txt", analysis= \
-                 ["associations","europeanassociations","recurrentloci","loci"])
+                 ["associations","europeanassociations","recurrentloci","loci"]), \
+           "gwas/results/combined_loci_annotated.txt", \
+           "gwas/tag_snps/figures/proxy_number.pdf", \
+           "gwas/tag_snps/num_proxies.txt"
 
 
 ########### Preprocessing GWAS catalog data ###########
