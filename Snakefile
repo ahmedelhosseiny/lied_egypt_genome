@@ -236,7 +236,7 @@ rule compute_assembly_stats:
 rule compute_content_and_assembly_numbers:
     input: expand( \
            "results/{assembly}/{task}_Homo_sapiens.{assembly}.dna.primary_assembly.txt", \
-           assembly = ["EGYPTREFWTDBG2V4","EGYPTREFWTDBG2V3","EGYPTREFWTDBG2V2","EGYPTREFWTDBG2","GRCh38","EGYPTREF","AK1","YORUBA","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"], \
+           assembly = ["EGYPTREFWTDBG2V3PILON","EGYPTREFWTDBG2V4","EGYPTREFWTDBG2V3","EGYPTREFWTDBG2V2","EGYPTREFWTDBG2","GRCh38","EGYPTREF","AK1","YORUBA","CEGYPTREF","EGYPTREFV2","CEGYPTREFV2"], \
            task = ["scaffold_names","num_bases","num_all","assembly_stats"])
 
 

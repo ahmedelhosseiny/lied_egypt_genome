@@ -1433,6 +1433,25 @@ rule select_variants_wo_dbsnp_id:
                         if af>=0.05:
                             f_out.write(line)
 
+# I used this file for annotating with Ensembl VEP the rsids again, using the 
+# latest VEP version, the result is only 49 SNPs without rsid left.
+# Here, we use the manually constructed file of these SNPs to extract the
+# corresponding information from the VCF file; this is useful for adding
+# allele frequencies to the suppl. table and it is also needed for submission to 
+# dbbSNP
+rule select_49_snps_wo_rsid:
+    input: "vep_annotation/vep.vcf.gz",
+           "data/positions_of_49_egyptian_snps_wo_rsid.txt"
+    output: "vep_annotation/vep_egyptian_common_wo_rsid_for_dbsnp.vcf.gz"
+    params: log_base=lambda wildcards, output: output[0][:-7]
+    conda: "envs/genotype_pcs.yaml"
+    shell: "vcftools --gzvcf {input[0]} " + \
+                    "--positions {input[1]} " + \
+                    "--recode-INFO-all " + \
+                    "--recode " + \
+                    "--out {params.log_base} " + \
+                    "--stdout | bgzip > {output[0]}" 
+
 
 ################################################################################
 ####### Performing preprocessing and statistics for SVs called by Axel #########

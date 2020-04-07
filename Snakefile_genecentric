@@ -88,8 +88,8 @@ rule gc_get_start_end_position:
                 s = line.split("\t")
                 if s[2] == "gene":
                     chr = s[0]
-                    start = str(int(s[3]) - WINDOW[wildcards.gene][0])
-                    end = str(int(s[4]) + WINDOW[wildcards.gene][1])
+                    start = str(int(s[3]) - WINDOW.get(wildcards.gene,[100000,100000])[0])
+                    end = str(int(s[4]) + WINDOW.get(wildcards.gene,[100000,100000])[1])
                     strand = s[6]
                     f_out.write("\t".join([chr,start,end,'.','.',strand])+"\n")
 
@@ -107,8 +107,8 @@ rule gc_get_start_end_position_with_chr:
                 s = line.split("\t")
                 if s[2] == "gene":
                     chr = s[0]
-                    start = str(int(s[3]) - WINDOW[wildcards.gene][0])
-                    end = str(int(s[4]) + WINDOW[wildcards.gene][1])
+                    start = str(int(s[3]) - WINDOW.get(wildcards.gene,[100000,100000])[0])
+                    end = str(int(s[4]) + WINDOW.get(wildcards.gene,[100000,100000])[1])
                     strand = s[6]
                     f_out.write("\t".join(["chr"+chr,start,end,'.','.',strand])+"\n")
 

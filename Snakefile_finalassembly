@@ -708,3 +708,39 @@ rule run_quast:
 #           "--min-identity 80.0 " + \
 #           "--ambiguity-score 0.8 " + \
 #           "--use-all-alignments " + \
+
+
+################################################################################
+################## Assembly quality assessment using KAT #######################
+################################################################################
+
+# Running all combined short read data
+# "kat_qc/{a}/{a}-main.mx.spectra-cn.png" 
+rule run_kat_combined:
+    input: "seq_{a}/Homo_sapiens.{a}.dna.primary_assembly.fa",
+           expand("data/02.DES/{lib}_1.fq.gz",lib=ILLUMINA_LIBS),
+           expand("data/02.DES/{lib}_2.fq.gz",lib=ILLUMINA_LIBS)
+    output: "kat_qc/{a}/{a}.stats"
+    params: file_base=lambda wildcards, output: output[0][:-6],
+            input_combined=lambda wildcards, input: " ".join(input[1:])
+    conda: "envs/kat.yaml"
+    shell: "kat comp -t 48 -o {params.file_base} " + \
+           "'{params.input_combined}' {input[0]}"
+
+# "kat_qc/{a}/{lib}/{a}.{lib}-main.mx.spectra-cn.png"
+rule run_kat_individual:
+    input: "seq_{a}/Homo_sapiens.{a}.dna.primary_assembly.fa",
+           "data/02.DES/{lib}_1.fq.gz","data/02.DES/{lib}_2.fq.gz"
+    output: "kat_qc/{a}/{lib}/{a}.{lib}.stats"
+    params: file_base=lambda wildcards, output: output[0][:-6]
+    conda: "envs/kat.yaml"
+    shell: "kat comp -t 32 -o {params.file_base} '{input[1]} {input[2]}' {input[0]} "
+
+rule run_kat_individual_all:
+    input: expand("kat_qc/{a}/{lib}/{a}.{lib}.stats", \
+           a=["EGYPTREFMETAV2ADDED"],lib=ILLUMINA_LIBS) #, \
+           #expand("kat_qc/{a}/{a}.stats",a=["EGYPTREFMETAV2ADDED","EGYPTREFV2"])
+
+rule run_kat_combined_all:
+    input: expand("kat_qc/{a}/{a}.stats",a=["EGYPTREFMETAV2ADDED","EGYPTREFV2"])
+
