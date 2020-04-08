@@ -724,7 +724,7 @@ rule run_kat_combined:
     params: file_base=lambda wildcards, output: output[0][:-6],
             input_combined=lambda wildcards, input: " ".join(input[1:])
     conda: "envs/kat.yaml"
-    shell: "kat comp -t 48 -o {params.file_base} " + \
+    shell: "kat comp -t 32 -o {params.file_base} " + \
            "'{params.input_combined}' {input[0]}"
 
 # "kat_qc/{a}/{lib}/{a}.{lib}-main.mx.spectra-cn.png"
@@ -744,3 +744,142 @@ rule run_kat_individual_all:
 rule run_kat_combined_all:
     input: expand("kat_qc/{a}/{a}.stats",a=["EGYPTREFMETAV2ADDED","EGYPTREFV2"])
 
+
+################################################################################
+################## SNP-based assembly quality (QV) #############################
+################################################################################
+
+# This follows the instructions here: 
+# https://github.com/fbemm/onefc-oneasm/wiki/Assembly-Validation
+# as well as Bickhart et al. (PMID 28263316); they write:
+# We identified erroneous
+# bases in the assembly using the variant calling software FreeBayes. We used 
+# a generalized metric, hereafter referred to as QV (otherwise known as a 
+# Phred42 score), to rank the proportion of variable bases to the number of 
+# bases with at least 3 X coverage in each assembly. QV was defined as:
+# QV = -10 log10(S / B)
+# where S indicates the cumulative length of all SNPs and INDELs identified by 
+# FreeBayes that have a probability of being heterozygous greater than 0.5, and 
+# B indicates the number of bases of the assembly that have at least 3 X 
+# coverage. Conceptually, this means that the QV represents the logarithm of the
+# per-base error rate of the short-read mappable portion of the assembly. Given 
+# that the QV estimate counts all heterozygous sites as being putative errors, 
+# this estimate can be considered a lower bound on the base quality in the 
+# mappable portions of the genome. 
+# Here , we use a coverage of more than 1x following the github code
+
+# Genome indexing with bwa
+rule bwa_index_for_qv:
+    input: "seq_{a}/Homo_sapiens.{a}.dna.primary_assembly.fa"
+    output: "qv_qc/{a}/bwa/{a}.amb",
+            "qv_qc/{a}/bwa/{a}.ann",
+            "qv_qc/{a}/bwa/{a}.bwt",
+            "qv_qc/{a}/bwa/{a}.pac",
+            "qv_qc/{a}/bwa/{a}.sa"
+    params: file_base=lambda wildcards, output: output[0][:-4]
+    conda: "envs/qv.yaml"
+    shell: "bwa index -a bwtsw " + \
+                     "-p {params.file_base} " + \
+                     "{input}"
+
+# Read Mapping
+rule bwa_mem_for_qv:
+    input: index = "qv_qc/{a}/bwa/{a}.sa",
+           fastq_r1 = "data/02.DES/{lib}_1.fq.gz",
+           fastq_r2 = "data/02.DES/{lib}_2.fq.gz"
+    output: "qv_qc/{a}/bwa/{lib}.bam"
+    params: file_base=lambda wildcards, input: input[0][:-3]
+    conda: "envs/qv.yaml"
+    shell: "bwa mem -t 24 " + \
+           "{params.file_base} "+\
+           "{input.fastq_r1} {input.fastq_r2} " + \
+           " | samtools sort -@24 -o {output} - "
+
+rule merge_bam_for_qv:
+    input: expand("qv_qc/{{a}}/bwa/{lib}.bam", lib=ILLUMINA_LIBS)
+    output: "qv_qc/{a}/{a}.srt.bam"
+    conda: "envs/qv.yaml"
+    shell: "samtools merge {output} {input}"
+
+# Indexing the bam file
+rule index_bam_for_qv:
+    input: "qv_qc/{a}/{a}.srt.bam"
+    output: "qv_qc/{a}/{a}.srt.bam.bai"
+    conda: "envs/qv.yaml"
+    shell: "samtools index {input}"
+
+# Variant calling with freebayes
+# -C consider at least this many observations to consider a variant
+# -p ploidy is 2 (default, thus omited)
+# On the website above, the call is
+# freebayes -C 1 -0 -O -q 20 -z 0.10 -E 0 -X -u -p 2 -b ONTmin_IT3.fasta.bam 
+# -v ONTmin_IT3.fasta.vcf -f ONTmin_IT3.fasta
+rule variant_calling_for_qv:
+    input: "qv_qc/{a}/{a}.srt.bam",
+           "seq_{a}/Homo_sapiens.{a}.dna.primary_assembly.fa"
+    output: "qv_qc/{a}/{a}.vcf"
+    conda: "envs/qv.yaml"
+    shell: "freebayes -f {input[1]} {input[0]} > {output[0]} "
+
+# SNP Extraction & Counting
+# vcfstats ONTmin_IT3.fasta.vcf > ONTmin_IT3.fasta.vcf.snps
+# CNT=$(grep -v "^#" ONTmin_IT3.fasta.vcf.snps | wc -l)
+rule num_variants_for_qv:
+    input: "qv_qc/{a}/{a}.vcf"
+    output: "qv_qc/{a}/{a}.numsnps"        
+    shell: "cat {input} | grep -v '#' | wc -l > {output}"
+
+# Effective Genome Size Estimation
+# Tis is obtained by summing the bases covered (which are given per coverage
+# bin within the stats file
+# samtools stats ONTmin_IT3.fasta.bam > ONTmin_IT3.fasta.bam.stats
+# BG=$(grep "^COV" ONTmin_IT4.fasta.bam.stats | cut -f4 | paste -sd + | bc)
+rule stats_for_eff_genome_size_for_qv:
+    input: "qv_qc/{a}/{a}.srt.bam"
+    output: "qv_qc/{a}/{a}.stats" 
+    conda: "envs/qv.yaml"
+    shell: "samtools stats {input} > {output} "
+
+# Tis is obtained by summing the bases covered, which are given per coverage
+# per line within the stats file
+# Here, we follow Bickhart et al. (PMID 28263316); they write:
+# We assessed assembly correctness using Black Yunnan Illumina 
+# alignments and structural variant calling software, Lumpy-SV43 as well as 
+# reference-free assembly validation software, FRCBam44. We identified erroneous
+# bases in the assembly using the variant calling software FreeBayes37. We used 
+# a generalized metric, hereafter referred to as QV (otherwise known as a 
+# Phred42 score), to rank the proportion of variable bases to the number of 
+# bases with at least 3 X coverage in each assembly. QV was defined as:
+# QV = -10 log10(S / B)
+# where S indicates the cumulative length of all SNPs and INDELs identified by 
+# FreeBayes that have a probability of being heterozygous greater than 0.5, and 
+# B indicates the number of bases of the assembly that have at least 3 X 
+# coverage. Conceptually, this means that the QV represents the logarithm of the
+# per-base error rate of the short-read mappable portion of the assembly. Given 
+# that the QV estimate counts all heterozygous sites as being putative errors, 
+# this estimate can be considered a lower bound on the base quality in the 
+# mappable portions of the genome. 
+rule compute_qv:
+    input: "qv_qc/{a}/{a}.numsnps",
+           "qv_qc/{a}/{a}.stats"
+    output: "qv_qc/{a}/{a}.qv"
+    run:
+        # Get number of variants called
+        numsnps = 0
+        with open(input[0],"r") as f_in:
+            numsnps = int(f_in.readlines.strip("n"))
+        # Get effective genome size as bases covered
+        genomesize = 0
+        with open(input[1],"r") as f_in:
+            for line in f_in:
+                if line[:3] == "COV":
+                    bases_covered = int(line.strip("\n").split("\t")[-1])
+                    genomesize += bases_covered
+        # Compute and write QV
+        with open(output[0],"w") as f_out:
+            f_out.write("Number variants called: "+str(numvariants))
+            f_out.write("Effective genome size: "+str(genomesize))
+            f_out.write("QV: "+str(-10*log10(numsnps/genomesize)))
+
+rule compute_qv_all:
+    input: expand("qv_qc/{a}/{a}.qv",a=["EGYPTREFMETAV2ADDED"])
