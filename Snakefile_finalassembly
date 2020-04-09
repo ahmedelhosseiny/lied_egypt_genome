@@ -720,29 +720,18 @@ rule run_kat_combined:
     input: "seq_{a}/Homo_sapiens.{a}.dna.primary_assembly.fa",
            expand("data/02.DES/{lib}_1.fq.gz",lib=ILLUMINA_LIBS),
            expand("data/02.DES/{lib}_2.fq.gz",lib=ILLUMINA_LIBS)
-    output: "kat_qc/{a}/{a}.stats"
+    output: "kat_qc/{a}/{a}.stats",
+            "kat_qc/{a}/{a}-main.mx.spectra-cn.png"
+    log: "kat_qc/{a}/{a}.log"
     params: file_base=lambda wildcards, output: output[0][:-6],
             input_combined=lambda wildcards, input: " ".join(input[1:])
     conda: "envs/kat.yaml"
     shell: "kat comp -t 32 -o {params.file_base} " + \
-           "'{params.input_combined}' {input[0]}"
-
-# "kat_qc/{a}/{lib}/{a}.{lib}-main.mx.spectra-cn.png"
-rule run_kat_individual:
-    input: "seq_{a}/Homo_sapiens.{a}.dna.primary_assembly.fa",
-           "data/02.DES/{lib}_1.fq.gz","data/02.DES/{lib}_2.fq.gz"
-    output: "kat_qc/{a}/{lib}/{a}.{lib}.stats"
-    params: file_base=lambda wildcards, output: output[0][:-6]
-    conda: "envs/kat.yaml"
-    shell: "kat comp -t 32 -o {params.file_base} '{input[1]} {input[2]}' {input[0]} "
-
-rule run_kat_individual_all:
-    input: expand("kat_qc/{a}/{lib}/{a}.{lib}.stats", \
-           a=["EGYPTREFMETAV2ADDED"],lib=ILLUMINA_LIBS) #, \
-           #expand("kat_qc/{a}/{a}.stats",a=["EGYPTREFMETAV2ADDED","EGYPTREFV2"])
+           "'{params.input_combined}' {input[0]} >{log} 2>&1"
 
 rule run_kat_combined_all:
-    input: expand("kat_qc/{a}/{a}.stats",a=["EGYPTREFMETAV2ADDED","EGYPTREFV2"])
+     input: expand("kat_qc/{a}/{a}.stats", \
+            a=["EGYPTREFMETAV2ADDED","EGYPTREFV2","EGYPTREFWTDBG2V3PILON"])
 
 
 ################################################################################
@@ -790,10 +779,10 @@ rule bwa_mem_for_qv:
     output: "qv_qc/{a}/bwa/{lib}.bam"
     params: file_base=lambda wildcards, input: input[0][:-3]
     conda: "envs/qv.yaml"
-    shell: "bwa mem -t 24 " + \
+    shell: "bwa mem -t 12 " + \
            "{params.file_base} "+\
            "{input.fastq_r1} {input.fastq_r2} " + \
-           " | samtools sort -@24 -o {output} - "
+           " | samtools sort -@12 -o {output} - "
 
 rule merge_bam_for_qv:
     input: expand("qv_qc/{{a}}/bwa/{lib}.bam", lib=ILLUMINA_LIBS)
@@ -809,11 +798,8 @@ rule index_bam_for_qv:
     shell: "samtools index {input}"
 
 # Variant calling with freebayes
-# -C consider at least this many observations to consider a variant
-# -p ploidy is 2 (default, thus omited)
-# On the website above, the call is
-# freebayes -C 1 -0 -O -q 20 -z 0.10 -E 0 -X -u -p 2 -b ONTmin_IT3.fasta.bam 
-# -v ONTmin_IT3.fasta.vcf -f ONTmin_IT3.fasta
+# We follow instructions from here:
+# https://www.biorxiv.org/content/10.1101/855049v1.full
 rule variant_calling_for_qv:
     input: "qv_qc/{a}/{a}.srt.bam",
            "seq_{a}/Homo_sapiens.{a}.dna.primary_assembly.fa"
@@ -821,53 +807,73 @@ rule variant_calling_for_qv:
     conda: "envs/qv.yaml"
     shell: "freebayes -f {input[1]} {input[0]} > {output[0]} "
 
-# SNP Extraction & Counting
-# vcfstats ONTmin_IT3.fasta.vcf > ONTmin_IT3.fasta.vcf.snps
-# CNT=$(grep -v "^#" ONTmin_IT3.fasta.vcf.snps | wc -l)
-rule num_variants_for_qv:
+# SNP filtering; this is as in 
+# https://www.biorxiv.org/content/10.1101/855049v1.full
+# i.e.  same as bcftools 
+# “QUAL >= 10 --genotype hom --max-alleles 2 --types snps,indels”. 
+rule filter_variants_for_qv:
     input: "qv_qc/{a}/{a}.vcf"
-    output: "qv_qc/{a}/{a}.numsnps"        
-    shell: "cat {input} | grep -v '#' | wc -l > {output}"
+    output: "qv_qc/{a}/{a}_filtered.vcf"
+    log: "qv_qc/{a}/{a}_filtered.log"
+    conda: "envs/qv.yaml"     
+    shell: "vcftools --vcf {input} " + \
+                    "--min-alleles 2 " + \
+                    "--max-alleles 2 " + \
+                    "--non-ref-ac 2 " + \
+                    "--minQ 10.0 " + \
+                    "--recode " + \
+                    "--stdout " + \
+                    ">{output} 2>{log}"
+
+rule count_diff_fo_qv:
+    input: "qv_qc/{a}/{a}_filtered.vcf"
+    output: "qv_qc/{a}/{a}_differences.txt"    
+    run:
+        diff = 0
+        with open(input[0],"r") as f_in:
+            for line in f_in:
+                # Skip header
+                if line[0] == '#':
+                    continue
+                s = line.split("\t")
+                # compute the difference between the allele lengths (indels)
+                allelelength_diff = int(abs(len(s[4])-len(s[3])))
+                # This is a snv
+                if allelelength_diff == 0:
+                    diff += 1
+                # This is an indel
+                else:
+                    diff += allelelength_diff
+        with open(output[0],"w") as f_out:
+            f_out.write(str(diff))
 
 # Effective Genome Size Estimation
-# Tis is obtained by summing the bases covered (which are given per coverage
+# Tis is obtained by summing the bases covered, which are given per coverage
 # bin within the stats file
-# samtools stats ONTmin_IT3.fasta.bam > ONTmin_IT3.fasta.bam.stats
-# BG=$(grep "^COV" ONTmin_IT4.fasta.bam.stats | cut -f4 | paste -sd + | bc)
 rule stats_for_eff_genome_size_for_qv:
     input: "qv_qc/{a}/{a}.srt.bam"
     output: "qv_qc/{a}/{a}.stats" 
     conda: "envs/qv.yaml"
     shell: "samtools stats {input} > {output} "
 
-# Tis is obtained by summing the bases covered, which are given per coverage
-# per line within the stats file
-# Here, we follow Bickhart et al. (PMID 28263316); they write:
-# We assessed assembly correctness using Black Yunnan Illumina 
-# alignments and structural variant calling software, Lumpy-SV43 as well as 
-# reference-free assembly validation software, FRCBam44. We identified erroneous
-# bases in the assembly using the variant calling software FreeBayes37. We used 
-# a generalized metric, hereafter referred to as QV (otherwise known as a 
-# Phred42 score), to rank the proportion of variable bases to the number of 
-# bases with at least 3 X coverage in each assembly. QV was defined as:
-# QV = -10 log10(S / B)
+# A generalized metric, hereafter referred to as QV (otherwise known as a 
+# Phred score), to rank the proportion of variable bases to the number of 
+# covered bases in the assembly. 
+# QV was defined as: QV = -10 log10(S / B)
 # where S indicates the cumulative length of all SNPs and INDELs identified by 
-# FreeBayes that have a probability of being heterozygous greater than 0.5, and 
-# B indicates the number of bases of the assembly that have at least 3 X 
-# coverage. Conceptually, this means that the QV represents the logarithm of the
-# per-base error rate of the short-read mappable portion of the assembly. Given 
-# that the QV estimate counts all heterozygous sites as being putative errors, 
-# this estimate can be considered a lower bound on the base quality in the 
-# mappable portions of the genome. 
+# FreeBayes; precisely, for indels we use the difference in length between
+# ref and alt allele
 rule compute_qv:
-    input: "qv_qc/{a}/{a}.numsnps",
+    input: "qv_qc/{a}/{a}_differences.txt",
            "qv_qc/{a}/{a}.stats"
     output: "qv_qc/{a}/{a}.qv"
     run:
+        import numpy as np
         # Get number of variants called
-        numsnps = 0
+        numdiff = 0
         with open(input[0],"r") as f_in:
-            numsnps = int(f_in.readlines.strip("n"))
+            for line in f_in:
+                numdiff = int(line.strip("\n"))
         # Get effective genome size as bases covered
         genomesize = 0
         with open(input[1],"r") as f_in:
@@ -877,9 +883,10 @@ rule compute_qv:
                     genomesize += bases_covered
         # Compute and write QV
         with open(output[0],"w") as f_out:
-            f_out.write("Number variants called: "+str(numvariants))
-            f_out.write("Effective genome size: "+str(genomesize))
-            f_out.write("QV: "+str(-10*log10(numsnps/genomesize)))
+            f_out.write("Sum base differences called: "+str(numdiff)+"\n")
+            f_out.write("Effective genome size: "+str(genomesize)+"\n")
+            f_out.write("QV: "+str(-10*np.log10(numdiff/genomesize))+"\n")
 
 rule compute_qv_all:
-    input: expand("qv_qc/{a}/{a}.qv",a=["EGYPTREFMETAV2ADDED"])
+    input: expand("qv_qc/{a}/{a}.qv", \
+           a=["EGYPTREFMETAV2ADDED","EGYPTREFV2","EGYPTREFWTDBG2V3PILON"])
