@@ -1,0 +1,219 @@
+
+EGYPT_SAMPLES = ["EGYPTREF","LU18","LU19","LU2","LU22","LU23","LU9","PD114", \
+                 "PD115","PD82"]
+
+PAGANI_SAMPLES = [
+    "EGAN00001101667","EGAN00001101668","EGAN00001101669","EGAN00001101670", \
+    "EGAN00001101671","EGAN00001101672","EGAN00001101676","EGAN00001101677", \
+    "EGAN00001101678","EGAN00001101679","EGAN00001101680","EGAN00001101681", \
+    "EGAN00001101682","EGAN00001101687","EGAN00001101688","EGAN00001101689", \
+    "EGAN00001101690","EGAN00001101692","EGAN00001101694","EGAN00001101699", \
+    "EGAN00001101700","EGAN00001101702","EGAN00001101705","EGAN00001101706", \
+    "EGAN00001101711","EGAN00001101712","EGAN00001101713","EGAN00001101716", \
+    "EGAN00001101717","EGAN00001101718","EGAN00001101719","EGAN00001101723", \
+    "EGAN00001101724","EGAN00001101725","EGAN00001101732","EGAN00001101734", \
+    "EGAN00001101735","EGAN00001101736","EGAN00001101737","EGAN00001101739", \
+    "EGAN00001101742","EGAN00001101744","EGAN00001101748","EGAN00001101749", \
+    "EGAN00001101750","EGAN00001101751","EGAN00001101752","EGAN00001101753", \
+    "EGAN00001101754","EGAN00001101755","EGAN00001101756","EGAN00001101758", \
+    "EGAN00001101759","EGAN00001101761","EGAN00001101767","EGAN00001101768", \
+    "EGAN00001101769","EGAN00001101771","EGAN00001101772","EGAN00001101774", \
+    "EGAN00001101776","EGAN00001101780","EGAN00001101781","EGAN00001101782", \
+    "EGAN00001101783","EGAN00001101784","EGAN00001101786","EGAN00001101787", \
+    "EGAN00001101788","EGAN00001101791","EGAN00001101792","EGAN00001101793", \
+    "EGAN00001101794","EGAN00001101796","EGAN00001101797","EGAN00001101798", \
+    "EGAN00001101799","EGAN00001101801","EGAN00001101802","EGAN00001101803", \
+    "EGAN00001101804","EGAN00001101807","EGAN00001101808","EGAN00001101809", \
+    "EGAN00001101813","EGAN00001101814","EGAN00001101816","EGAN00001101819", \
+    "EGAN00001101820","EGAN00001101823","EGAN00001101824","EGAN00001101825", \
+    "EGAN00001101827","EGAN00001101829","EGAN00001101830","EGAN00001101831", \
+    "EGAN00001101835","EGAN00001101839","EGAN00001101840","EGAN00001101841"
+]
+
+INDIVIDUALS = EGYPT_SAMPLES+PAGANI_SAMPLES
+
+
+# Symlinking the result folder of Matthias
+rule symlinking_nui_results:
+    input: "/data/lied_egypt_genome/output_wgs2/novel_sequences"
+    output: directory("nui/novel_sequences")
+    shell: "ln -s /data/lied_egypt_genome/output_wgs2/novel_sequences {output}"
+
+# Symlinking the quast alignments for the final meta assembly
+rule symlinking_quast_alignments:
+    input: "/data/lied_egypt_genome/lied_egypt_genome/quast_results/latest/contigs_reports/contigs_report_EGYPT.stdout"
+    output: "nui/contigs_report_EGYPT.stdout"
+    shell: "ln -s {input} {output}"
+
+# Extract for every nui (of the 40 here) the corresponding contig alignment
+# block from the quast results
+rule select_quast_alignment_info:
+    input: "nui/novel_sequences/novel_seq.gr5_10.regions.txt",
+           "nui/contigs_report_EGYPT.stdout"
+    output: "nui/novel_seq.gr5_10.alignment_info.txt"
+    run:
+        with open(input[0],"r") as f_in_regions,open(output[0],"w") as f_out:
+            for liner in f_in_regions:
+                f_out.write(liner)
+                ctg_nui, start_nui, stop_nui = liner.strip("\n").split("\t")
+                start_nui = int(start_nui)
+                stop_nui = int(stop_nui)
+                assert(start_nui<stop_nui)
+                with open(input[1],"r") as f_in_alignments:
+                    for linea in f_in_alignments:
+                        #print(linea)
+                        s = linea.strip("\n").split("|")
+                        if not len(s) == 5 or "Excluding internal overlap" in linea:
+                            continue
+                        info = " ".join(s[0].strip().split(" ")[:-2])
+                        #print(info)
+                        chrom_start, chrom_end = [int(x) for x in s[0].strip().split(" ")[-2:]]
+                        #print(chrom_start)
+                        #print(chrom_end)
+                        ctg_start, ctg_end = [int(x) for x in s[1].strip().split(" ")]
+                        #print(ctg_start)
+                        #print(ctg_end)
+                        len_chrom, len_ctg = [int(x) for x in s[2].strip().split(" ")]
+                        assert(len_chrom == abs(chrom_end-chrom_start)+1)
+                        assert(len_ctg == abs(ctg_end-ctg_start)+1)
+                        ident = float(s[3].strip())
+                        #print(ident)
+                        chrom, ctg = s[4].strip().split(" ")
+                        #print(chrom)
+                        #print(ctg)
+                        if ctg == ctg_nui and min(ctg_start,ctg_end)<start_nui<max(ctg_start,ctg_end) or \
+                                              min(ctg_start,ctg_end)<ctg_start<stop_nui<max(ctg_start,ctg_end):
+                            f_out.write(linea)
+                        
+# Get for every sample the number of reads that couldn't be mapped using the 
+# reference genome and the GATK bundle sequences
+rule num_unmapped_reads:
+    input: "/data/lied_egypt_genome/output_wgs2/{sample}/{sample}.f13.bam"
+    output: "nui/num_unmapped/{sample}_num_unmapped.txt"
+    conda: "envs/samtools.yaml"
+    shell: "samtools view {input} | wc -l > {output}"
+
+# Get for every sample the number of previously unmapped reads, which map to 
+# the assembly; that means we exclude (-F) reads that are still unmapped (4)
+rule num_unmapped_reads_mapping_to_assembly:
+    input: "/data/lied_egypt_genome/output_wgs2/{sample}/{sample}.f13.bam"
+    output: "nui/num_unmapped_mapping_assembly/{sample}_num_unmapped_mapping_assembly.txt"
+    conda: "envs/samtools.yaml"
+    shell: "samtools view -F 4 {input} | wc -l > {output}"
+
+rule num_unmapped_reads_all:
+    input: expand("nui/num_unmapped/{sample}_num_unmapped.txt", \
+                  sample=INDIVIDUALS),
+           expand("nui/num_unmapped_mapping_assembly/{sample}_num_unmapped_mapping_assembly.txt", \
+                  sample=INDIVIDUALS)
+
+rule percent_assembly_mapped_reads:
+    input: expand("nui/num_unmapped/{sample}_num_unmapped.txt", \
+                  sample=INDIVIDUALS),
+           expand("nui/num_unmapped_mapping_assembly/{sample}_num_unmapped_mapping_assembly.txt", \
+                  sample=INDIVIDUALS)
+    output: "nui/percent_assembly_mapped.txt"
+    run:
+        with open(output[0],"w") as f_out:
+            header = ["SAMPLE","REFERENCE_UNMAPPED","THEROF_ASSEMBLY_MAPPED","PERCENT"]
+            f_out.write("\t".join(header)+"\n")
+            for i in range(0,110):
+                file_unmapped = input[i]
+                file_mapped = input[110+i]
+                with open(file_unmapped,"r") as f_in:
+                    for line in f_in:
+                        unmapped = line.strip("\n")
+                with open(file_mapped,"r") as f_in:
+                    for line in f_in:
+                        mapped = line.strip("\n")
+                sample_name = file_unmapped.split("/")[2].split("_")[0]
+                percent = 100*int(mapped)/int(unmapped)
+                f_out.write("\t".join([sample_name,unmapped,mapped,str(percent)])+"\n")
+
+rule boxplot_assembly_mapped_reads:
+    input: "nui/percent_assembly_mapped.txt"
+    output: "nui/boxplot_assembly_mapped.pdf"
+    script: "scripts/assembly_mapping_reads.R"
+
+# Filter variants in nuis to keep only those with quality more than 10
+# Keep only snvs (i.e. remove indels)
+rule filter_nui_snvs_by_quality:
+    input: "nui/novel_sequences/variants/novel_seq.gr5_10.vcf.gz"
+    output: "nui/novel_seq_snvs.gr5_10.vcf"
+    log: "nui/filter_nui_snvs.log"
+    conda: "envs/vcftools.yaml"
+    shell: "vcftools --gzvcf {input} " + \
+                    "--minQ 10.0 " + \
+                    "--remove-indels " + \
+                    "--recode " + \
+                    "--recode-INFO-all " + \
+                    "--stdout >{output} 2>{log}"
+
+# Filter variants in nuis to keep only those with quality more than 10
+# Keep only snvs (i.e. remove indels)
+rule filter_nui_indels_by_quality:
+    input: "nui/novel_sequences/variants/novel_seq.gr5_10.vcf.gz"
+    output: "nui/novel_seq_indels.gr5_10.vcf"
+    log: "nui/filter_nui_indels.log"
+    conda: "envs/vcftools.yaml"
+    shell: "vcftools --gzvcf {input} " + \
+                    "--minQ 10.0 " + \
+                    "--keep-only-indels " + \
+                    "--recode " + \
+                    "--recode-INFO-all " + \
+                    "--stdout >{output} 2>{log}"
+
+rule summarize_vcf_by_nui:
+    input: "nui/novel_sequences/novel_seq.gr5_10.regions.txt",
+           "nui/novel_seq_snvs.gr5_10.vcf",
+           "nui/novel_seq_indels.gr5_10.vcf"
+    output: "nui/nui_variant_summary.txt"
+    run:
+        with open(input[0],"r") as f_in, open(output[0],"w") as f_out:
+            header = ["NUI_CTG","NUI_START","NUI_END"]
+            header += ["VAR_CTG","VAR_POS","REF","ALT","QUAL","AC","AN","TYPE"]
+            f_out.write("\t".join(header)+"\n")
+            for line in f_in:
+                nui_ctg,nui_start,nui_end = line.strip("\n").split("\t")
+                with open(input[1],"r") as f_snvs:
+                    for line_snv in f_snvs:
+                        if line_snv[0] == '#':
+                            continue
+                        s = line_snv.split("\t")
+                        ctg = s[0]
+                        pos = s[1]
+                        ref = s[3]
+                        alt = s[4]
+                        qual = s[5]
+                        ac,an = s[7].split(";")[10:12]
+                        ac_string,ac = ac.split("=")
+                        an_string,an = an.split("=")
+                        if not ac_string == "AC" or not an_string=="AN":
+                            ac,an = s[7].split(";")[9:11]
+                            ac_string,ac = ac.split("=")
+                            an_string,an = an.split("=")
+                        assert(ac_string == "AC")
+                        assert(an_string == "AN")
+                        if ctg == nui_ctg and int(nui_start)<=int(pos)<=int(nui_end):
+                            out_string = [nui_ctg,nui_start,nui_end]
+                            out_string += [ctg,pos,ref,alt,qual,ac,an,"SNV"]
+                            f_out.write("\t".join(out_string)+"\n")
+                with open(input[2],"r") as f_indels:
+                    for line_indel in f_indels:
+                        if line_indel[0] == '#':
+                            continue
+                        s = line_indel.split("\t")
+                        ctg = s[0]
+                        pos = s[1]
+                        ref = s[3]
+                        alt = s[4]
+                        qual = s[5]
+                        ac,an = s[7].split(";")[10:12]
+                        ac = ac.split("=")[1]
+                        an = an.split("=")[1]
+                        if ctg == nui_ctg and int(nui_start)<=int(pos)<=int(nui_end):
+                            out_string = [nui_ctg,nui_start,nui_end]
+                            out_string += [ctg,pos,ref,alt,qual,ac,an,"INDEL"]
+                            f_out.write("\t".join(out_string)+"\n")
+                        
+                
