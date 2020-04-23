@@ -890,3 +890,93 @@ rule compute_qv:
 rule compute_qv_all:
     input: expand("qv_qc/{a}/{a}.qv", \
            a=["EGYPTREFMETAV2ADDED","EGYPTREFV2","EGYPTREFWTDBG2V3PILON"])
+
+
+################################################################################
+########### Misassembly classification as add-on to QUAST QC numbers ###########
+################################################################################
+
+rule get_egyptref_delly_svs:
+    input: "sv_stats/egyptians.vcf.gz"
+    output:  "misassembly_qc/EGYPT_SVs_delly.vcf.gz"
+    conda: "envs/vcftools.yaml"
+    shell: "vcftools --gzvcf {input} " + \
+                    "--recode " + \
+                    "--indv EGYPTREF " + \
+                    "--non-ref-ac 1 " + \
+                    "--remove-filtered-all " + \
+                    "--stdout " + \
+                    "| bgzip > {output} "
+
+rule egyptref_delly_svs_to_bed:
+    input: "misassembly_qc/EGYPT_SVs_delly.vcf.gz"
+    output: "misassembly_qc/EGYPT_SVs_delly.pos",
+            "misassembly_qc/EGYPT_SVs_delly.bed"
+    shell: "zcat {input} | grep -v '#' | cut -f 1,2 | sort | uniq " + \
+           "> {output[0]}; cat {output[0]} | cut -f 2 > {output[0]}.tmp; " + \
+           "paste {output[0]} {output[0]}.tmp | cut -c 4- > {output[1]}"
+
+rule misassembly_classification_egypt:
+    input: "quast_results/latest/contigs_reports/all_alignments_EGYPT.tsv",
+           "misassembly_qc/EGYPT_SVs_delly.bed",
+           "misc/ucsc.collapsed.sorted.segdups",
+           "misc/Modeled_regions_for_GRCh38.tsv"
+    output: "misassembly_qc/misassembly_EGYPT.out"
+    shell: "python3 scripts/quast_misassembly_classification.py " + \
+           "-q {input[0]} "
+           "-c {input[3]} "
+           "-s {input[1]} "
+           "-d {input[2]} "
+           ">{output};"
+
+rule misassembly_classification_egypt_wtdbg2:
+    input: "quast_results/latest/contigs_reports/all_alignments_EGYPT_wtdbg2.tsv",
+           "misassembly_qc/EGYPT_SVs_delly.bed",
+           "misc/ucsc.collapsed.sorted.segdups",
+           "misc/Modeled_regions_for_GRCh38.tsv"
+    output: "misassembly_qc/misassembly_EGYPT_wtdbg2.out"
+    shell: "python3 scripts/quast_misassembly_classification.py " + \
+           "-q {input[0]} "
+           "-c {input[3]} "
+           "-s {input[1]} "
+           "-d {input[2]} "
+           ">{output};"
+
+rule misassembly_classification_egypt_falcon:
+    input: "quast_results/latest/contigs_reports/all_alignments_EGYPT_falcon.tsv",
+           "misassembly_qc/EGYPT_SVs_delly.bed",
+           "misc/ucsc.collapsed.sorted.segdups",
+           "misc/Modeled_regions_for_GRCh38.tsv"
+    output: "misassembly_qc/misassembly_EGYPT_falcon.out"
+    shell: "python3 scripts/quast_misassembly_classification.py " + \
+           "-q {input[0]} "
+           "-c {input[3]} "
+           "-s {input[1]} "
+           "-d {input[2]} "
+           ">{output};"
+
+rule misassembly_classification_ak1:
+    input: "quast_results/latest/contigs_reports/all_alignments_AK1.tsv",
+           "misc/ak1_svs_sup_tab_16.bed",
+           "misc/ucsc.collapsed.sorted.segdups",
+           "misc/Modeled_regions_for_GRCh38.tsv"
+    output: "misassembly_qc/misassembly_AK1.out"
+    shell: "python3 scripts/quast_misassembly_classification.py " + \
+           "-q {input[0]} "
+           "-c {input[3]} "
+           "-s {input[1]} "
+           "-d {input[2]} "
+           ">{output};"
+
+rule misassembly_classification_yoruba:
+    input: "quast_results/latest/contigs_reports/all_alignments_YORUBA.tsv",
+           "misc/empty.bed",
+           "misc/ucsc.collapsed.sorted.segdups",
+           "misc/Modeled_regions_for_GRCh38.tsv"
+    output: "misassembly_qc/misassembly_YORUBA.out"
+    shell: "python3 scripts/quast_misassembly_classification.py " + \
+           "-q {input[0]} "
+           "-c {input[3]} "
+           "-s {input[1]} "
+           "-d {input[2]} "
+           ">{output};"
