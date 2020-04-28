@@ -980,3 +980,25 @@ rule misassembly_classification_yoruba:
            "-s {input[1]} "
            "-d {input[2]} "
            ">{output};"
+
+
+################################################################################
+########## Extracting the number of heterozygous, phased variants ##   #########
+################################################################################
+ 
+rule heterozygous_and heterozygous_phased:
+    input: "longranger_phasing/EGYPTREF/outs/phased_variants.vcf.gz"
+    output: "variant_stats/EGYPTREF_phased_variants.vcf"
+    shell: "zcat {input} > {output}"
+
+# Because we use the cohort-called SNVs, it is not so straight-forward to count 
+# the number of variants Egyptref-individual level variant with respect to 
+# certain properties; thus, here we output a binary string for every read 
+# denoting whether he fulfills the property (1) or not (0). Main application
+# is that we want to use this to correctly reproduce the percentage of variants
+# phased which is reported by the 10x genomics longranger phasing summary
+rule count_variants:
+    input: "variant_stats/EGYPTREF_phased_variants.vcf"
+    output: "variant_stats/EGYPTREF_phasing_properties.txt"
+    script: "scripts/count_phasing_variants.py"
+    
