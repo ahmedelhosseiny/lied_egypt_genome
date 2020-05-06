@@ -1,0 +1,4 @@
+channels:
+  - bioconda
+dependencies:
+  - links == 1.8.6
